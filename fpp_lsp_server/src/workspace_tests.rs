@@ -21,7 +21,7 @@ use std::path::Path;
 use std::str::FromStr;
 
 /// Fresh, empty directory under `target/` for a test's fixture files.
-fn fixture_dir(name: &str) -> std::path::PathBuf {
+pub(crate) fn fixture_dir(name: &str) -> std::path::PathBuf {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("target")
         .join(name);
@@ -31,7 +31,7 @@ fn fixture_dir(name: &str) -> std::path::PathBuf {
 }
 
 /// Index a workspace rooted at `folder` and run analysis to completion.
-fn index_workspace(folder: &Path) -> GlobalState {
+pub(crate) fn index_workspace(folder: &Path) -> GlobalState {
     let folder_uri = crate::uri::from_file_path(folder).unwrap();
     let workspace_folders = vec![WorkspaceFolder {
         uri: Uri::from_str(&folder_uri).unwrap(),

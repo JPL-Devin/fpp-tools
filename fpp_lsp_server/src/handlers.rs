@@ -2,6 +2,7 @@ use crate::global_state::{GlobalState, Task};
 use crate::lsp;
 use crate::lsp::utils::semantic_token_delta;
 use crate::lsp_ext::UriRequest;
+use crate::phases;
 use crate::util::{
     completion_items_for_port_instance, completion_items_for_port_match,
     completion_items_for_postfix_expr, completion_items_for_qual_ident, completion_items_for_sm,
@@ -21,9 +22,10 @@ use lsp_types::{
     CompletionItem, CompletionItemKind, CompletionParams, CompletionResponse,
     DidChangeTextDocumentParams, DidChangeWatchedFilesParams, DidCloseTextDocumentParams,
     DidOpenTextDocumentParams, DocumentDiagnosticReportResult, DocumentFormattingParams,
-    DocumentLink, DocumentRangeFormattingParams, FileChangeType, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverParams, Location, Position, Range, ReferenceParams,
-    SemanticTokensFullDeltaResult, SemanticTokensRangeResult, SemanticTokensResult, TextEdit, Uri,
+    DocumentLink, DocumentRangeFormattingParams, FileChangeType, FoldingRange, FoldingRangeKind,
+    FoldingRangeParams, GotoDefinitionParams, GotoDefinitionResponse, Hover, HoverParams, Location,
+    Position, Range, ReferenceParams, SemanticTokensFullDeltaResult, SemanticTokensRangeResult,
+    SemanticTokensResult, TextEdit, Uri,
 };
 use serde::{Deserialize, Serialize};
 use std::str::FromStr;
@@ -499,6 +501,39 @@ pub fn handle_document_link_resolve(
     })
 }
 
+/// Folding ranges for init specifiers: each multi-line `phase ... """..."""`
+/// block folds down to its first line.
+pub fn handle_folding_range(
+    state: &GlobalState,
+    request: FoldingRangeParams,
+) -> Result<Option<Vec<FoldingRange>>> {
+    let (_, _, parse) = parse_text_document(state, &request.text_document.uri)?;
+    let lines = state.vfs.get_lines(request.text_document.uri.as_str())?;
+
+    let ranges: Vec<FoldingRange> = parse
+        .syntax_node()
+        .descendants()
+        .filter(|n| n.kind() == SyntaxKind::SPEC_INIT)
+        .filter_map(|n| {
+            let range = text_range_to_range(&lines, n.text_range());
+            (range.end.line > range.start.line).then_some(FoldingRange {
+                start_line: range.start.line,
+                start_character: Some(range.start.character),
+                end_line: range.end.line,
+                end_character: Some(range.end.character),
+                kind: Some(FoldingRangeKind::Region),
+                collapsed_text: None,
+            })
+        })
+        .collect();
+
+    if ranges.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(ranges))
+    }
+}
+
 pub fn handle_goto_definition(
     state: &GlobalState,
     request: GotoDefinitionParams,
@@ -510,6 +545,26 @@ pub fn handle_goto_definition(
     );
 
     let uri = &request.text_document_position_params.text_document.uri;
+
+    // The `phase` keyword and the code string of an init specifier jump to the
+    // generated topology C++. The phase expression itself is excluded, so it
+    // still resolves to the `Fpp.ToCpp.Phases` constant below.
+    if let Some(at) = phases::init_spec_at_offset(state, uri, offset) {
+        let Some(ctx) = phases::phase_context(state, &at) else {
+            return Ok(None);
+        };
+        let locations: Vec<Location> = match phases::generated_targets(state, &ctx) {
+            Ok(targets) => targets.iter().filter_map(|t| t.location()).collect(),
+            Err(_) => vec![],
+        };
+        return Ok(match locations.len() {
+            0 => None,
+            1 => Some(GotoDefinitionResponse::Scalar(
+                locations.into_iter().next().unwrap(),
+            )),
+            _ => Some(GotoDefinitionResponse::Array(locations)),
+        });
+    }
 
     // Port names in connections resolve to a port instance rather than a symbol;
     // jump to the port instance's declaration. This must be checked *before*
@@ -553,6 +608,14 @@ pub fn handle_hover(state: &GlobalState, request: HoverParams) -> Result<Option<
         &request.text_document_position_params.text_document.uri,
         &request.text_document_position_params.position,
     );
+
+    if let Some(at) = phases::init_spec_at_offset(
+        state,
+        &request.text_document_position_params.text_document.uri,
+        offset,
+    ) {
+        return Ok(phases::hover_for_init_spec(state, &at));
+    }
 
     let nodes = match nodes_at_offset(
         state,
