@@ -455,8 +455,10 @@ const MAX_SCAN_DEPTH: usize = 12;
 /// Locate `<Top>TopologyAc.<ext>` for a topology defined in `topology_dir`.
 ///
 /// The source directory is mapped into the build cache through the
-/// `fprime-locations.fprime-util` pairs; if that fails, the build cache is
-/// scanned for a file with the expected name.
+/// `fprime-locations.fprime-util` pairs. Only when the directory cannot be
+/// mapped at all is the build cache scanned for a file with the expected name;
+/// a mapped directory without the file means the topology has not been
+/// generated yet.
 pub fn generated_file_for_topology(
     build_cache: &Path,
     topology_dir: Option<&Path>,
@@ -471,9 +473,7 @@ pub fn generated_file_for_topology(
             .unwrap_or_default();
         if let Some(build_dir) = map_source_to_build(&pairs, src_dir) {
             let candidate = build_dir.join(&file_name);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
+            return candidate.is_file().then_some(candidate);
         }
     }
 
@@ -691,7 +691,7 @@ pub fn hover_for_init_spec(state: &GlobalState, at: &InitSpecAt<'_>) -> Option<H
     match generated_targets(state, &ctx) {
         Ok(targets) => {
             md.push(
-                "**Generated code** (Ctrl+click the `phase` keyword or the code to jump)"
+                "**Generated code** (Go to Definition on `phase` or the code jumps there)"
                     .to_string(),
             );
             md.push(String::new());

@@ -86,7 +86,8 @@ the project.
 - Init phase navigation (`phase Fpp.ToCpp.Phases.<phase> """ ... """`)
   - `Ctrl-Click` on the `phase` keyword or inside the code string opens the line where the
     snippet landed in the generated `<Top>TopologyAc.cpp`/`.hpp` of every topology that
-    includes the instance (requires a `buildCache` in `.fpp-lsp`)
+    includes the instance (requires `buildCache` or `locs` in `.fpp-lsp` so the server knows
+    the build cache)
   - Hover shows the phase description, ordinal, generated C++ signature, and links to the
     generated code, with a warning when the build cache is older than the source
   - Phase blocks can be folded

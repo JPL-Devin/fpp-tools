@@ -44,8 +44,22 @@ module Ref {
       """
   }
 
+  instance shared: C base id 0x300 {
+    phase Fpp.ToCpp.Phases.configConstants """
+      enum { SHARED_LIMIT = 3 };
+      """
+    phase Fpp.ToCpp.Phases.configComponents """
+      shared.configure(SHARED_LIMIT);
+      """
+  }
+
   topology Ref {
     instance c
+    instance shared
+  }
+
+  topology Alt {
+    instance shared
   }
 }
 "#;
@@ -69,6 +83,29 @@ namespace Ref {
 
   void configComponents(const TopologyState& state) {
     c.configure(1);
+    shared.configure(SHARED_LIMIT);
+  }
+
+}
+"#;
+
+const GENERATED_HPP: &str = r#"// Generated
+namespace Ref {
+
+  namespace ConfigConstants {
+    namespace Ref_shared {
+      enum { SHARED_LIMIT = 3 };
+    }
+  }
+
+}
+"#;
+
+const GENERATED_ALT_CPP: &str = r#"// Generated
+namespace Ref {
+
+  void configComponents(const TopologyState& state) {
+    shared.configure(SHARED_LIMIT);
   }
 
 }
@@ -78,6 +115,8 @@ struct Fixture {
     dir: PathBuf,
     top_uri: String,
     generated_cpp: PathBuf,
+    generated_hpp: PathBuf,
+    generated_alt_cpp: PathBuf,
 }
 
 /// Lay out a project with a `.fpp-lsp` pointing at a build cache that holds
@@ -97,7 +136,9 @@ fn fixture(name: &str) -> Fixture {
          locate component Ref.C at \"../Top/Top.fpp\"\n\
          locate instance Ref.c at \"../Top/Top.fpp\"\n\
          locate instance Ref.unused at \"../Top/Top.fpp\"\n\
+         locate instance Ref.shared at \"../Top/Top.fpp\"\n\
          locate topology Ref.Ref at \"../Top/Top.fpp\"\n\
+         locate topology Ref.Alt at \"../Top/Top.fpp\"\n\
          locate port Fw.Ping at \"../Top/Ping.fpp\"\n",
     )
     .unwrap();
@@ -108,6 +149,10 @@ fn fixture(name: &str) -> Fixture {
     .unwrap();
     let generated_cpp = build.join("Top").join("RefTopologyAc.cpp");
     std::fs::write(&generated_cpp, GENERATED_CPP).unwrap();
+    let generated_hpp = build.join("Top").join("RefTopologyAc.hpp");
+    std::fs::write(&generated_hpp, GENERATED_HPP).unwrap();
+    let generated_alt_cpp = build.join("Top").join("AltTopologyAc.cpp");
+    std::fs::write(&generated_alt_cpp, GENERATED_ALT_CPP).unwrap();
     std::fs::write(
         dir.join(".fpp-lsp"),
         "buildCache: build-fprime-automatic-native\n",
@@ -119,6 +164,8 @@ fn fixture(name: &str) -> Fixture {
         dir,
         top_uri,
         generated_cpp,
+        generated_hpp,
+        generated_alt_cpp,
     }
 }
 
@@ -255,6 +302,47 @@ fn goto_on_phase_name_still_resolves_enum_constant() {
 }
 
 #[test]
+fn goto_lists_every_topology_including_the_instance() {
+    let f = fixture("phases_goto_multi");
+    let state = index_workspace(&f.dir);
+
+    let pos = position_of(TOP_FPP, "shared.configure(SHARED_LIMIT);", 0);
+    let mut locs = goto(&state, &f.top_uri, pos);
+    locs.sort_by_key(path_of);
+    assert_eq!(locs.len(), 2, "{locs:?}");
+    assert_eq!(path_of(&locs[0]), f.generated_alt_cpp);
+    assert_eq!(
+        locs[0].range.start.line,
+        line_of(GENERATED_ALT_CPP, "shared.configure(SHARED_LIMIT);")
+    );
+    assert_eq!(path_of(&locs[1]), f.generated_cpp);
+    assert_eq!(
+        locs[1].range.start.line,
+        line_of(GENERATED_CPP, "shared.configure(SHARED_LIMIT);")
+    );
+
+    let text = hover(&state, &f.top_uri, pos).unwrap();
+    assert!(text.contains("`Ref.Alt`"), "{text}");
+    assert!(text.contains("`Ref.Ref`"), "{text}");
+}
+
+#[test]
+fn goto_on_config_constants_targets_the_generated_header() {
+    let f = fixture("phases_goto_hpp");
+    let state = index_workspace(&f.dir);
+
+    // Only `Ref` has a generated header, so `Alt` contributes no target.
+    let pos = position_of(TOP_FPP, "enum { SHARED_LIMIT = 3 };", 0);
+    let locs = goto(&state, &f.top_uri, pos);
+    assert_eq!(locs.len(), 1, "{locs:?}");
+    assert_eq!(path_of(&locs[0]), f.generated_hpp);
+    assert_eq!(
+        locs[0].range.start.line,
+        line_of(GENERATED_HPP, "enum { SHARED_LIMIT = 3 };")
+    );
+}
+
+#[test]
 fn goto_without_topology_or_generated_file_yields_nothing() {
     let f = fixture("phases_goto_missing");
     let state = index_workspace(&f.dir);
@@ -343,7 +431,7 @@ fn folding_ranges_cover_phase_blocks_only() {
     .unwrap()
     .unwrap();
 
-    assert_eq!(ranges.len(), 3, "{ranges:?}");
+    assert_eq!(ranges.len(), 5, "{ranges:?}");
     let first = &ranges[0];
     assert_eq!(
         first.start_line,
