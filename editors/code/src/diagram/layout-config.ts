@@ -109,7 +109,7 @@ export class FppDiagramConfig extends DefaultLayoutConfigurator {
             // layer and outputs to the last so they sit on the diagram's edge.
             const isOutput = (snode as BoundarySNode).isOutput;
             return {
-                'elk.layered.layerConstraint': isOutput ? 'LAST_SEPARATE' : 'FIRST_SEPARATE',
+                'elk.layered.layering.layerConstraint': isOutput ? 'LAST_SEPARATE' : 'FIRST_SEPARATE',
                 'elk.nodeLabels.placement': 'INSIDE, H_CENTER, V_CENTER',
                 'elk.nodeSize.constraints': 'NODE_LABELS, MINIMUM_SIZE',
                 'elk.nodeSize.minimum': '(40, 22)',
