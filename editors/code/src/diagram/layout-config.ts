@@ -58,8 +58,13 @@ export class FppDiagramConfig extends DefaultLayoutConfigurator {
                 'elk.layered.selfLoopDistribution': 'EQUALLY',
             };
         }
+        // Boundary ports are pinned to the first/last layer, which only lines
+        // them up along the diagram's edges if ELK lays the graph out as one
+        // piece rather than packing each connected component separately.
+        const hasBoundary = sgraph.children.some(c => c.type === 'node:boundary');
         return {
             'elk.algorithm': 'layered',
+            ...(hasBoundary ? { 'elk.separateConnectedComponents': 'false' } : {}),
             // Apply some spacing at the graph level to ensure the layered algorithm picks it up.
             'elk.spacing.labelPortHorizontal': '5',
             'elk.spacing.portPort': '10',
