@@ -96,6 +96,9 @@ pub fn lower_topology_view(
             diagram.nodes = scope.component_nodes();
             diagram.topology_nodes = scope.topology_nodes();
             diagram.edges = scope.edges(None);
+            diagram
+                .edges
+                .extend(scope.import_alias_edges().into_iter().map(|(_, e)| e));
             let (ports, edges) = scope.boundary();
             diagram.boundary_ports = ports;
             diagram.edges.extend(edges);
@@ -157,7 +160,18 @@ pub fn lower_connection_group_view(
         }
         TopologyView::Collapsed => {
             let scope = CollapsedScope::new(a, topology);
-            let touched = scope.touched(Some(group));
+            let mut touched = scope.touched(Some(group));
+            // A declared port of a drawn collapsed node brings in what it aliases.
+            let alias_edges: Vec<Edge> = scope
+                .import_alias_edges()
+                .into_iter()
+                .filter(|(import, _)| touched.contains(import))
+                .map(|(_, e)| e)
+                .collect();
+            for e in &alias_edges {
+                touched.insert(scope.node_of(&e.from_port).to_string());
+                touched.insert(scope.node_of(&e.to_port).to_string());
+            }
             let nodes = scope
                 .component_nodes()
                 .into_iter()
@@ -168,7 +182,9 @@ pub fn lower_connection_group_view(
                 .into_iter()
                 .filter(|n| touched.contains(&n.id))
                 .collect();
-            (scope.edges(Some(group)), nodes, topology_nodes)
+            let mut edges = scope.edges(Some(group));
+            edges.extend(alias_edges);
+            (edges, nodes, topology_nodes)
         }
     };
 
@@ -540,6 +556,16 @@ impl<'a> CollapsedScope<'a> {
         }
     }
 
+    /// The node an edge end belongs to: the end is either a collapsed node id
+    /// or a port id.
+    fn node_of<'b>(&self, end: &'b str) -> &'b str {
+        if self.imported.contains_key(end) {
+            end
+        } else {
+            node_id_of_port(end)
+        }
+    }
+
     /// The connection graphs to draw: all of them, or just `only_group`.
     fn graphs(
         &self,
@@ -658,16 +684,46 @@ impl<'a> CollapsedScope<'a> {
     /// The topology's own declared ports, drawn on the diagram boundary, and
     /// the edges joining each to the port it aliases.
     fn boundary(&self) -> (Vec<Port>, Vec<Edge>) {
-        let node_id = &self.topology.qualified_name;
+        self.alias_edges(self.topology, &self.topology.qualified_name, "boundary")
+    }
+
+    /// Edges joining a declared port of a collapsed node to what it aliases
+    /// when that lies outside the node: an instance drawn on its own, or one
+    /// owned by another collapsed node. Each is paired with the collapsed
+    /// node's id.
+    fn import_alias_edges(&self) -> Vec<(String, Edge)> {
+        self.imported
+            .iter()
+            .flat_map(|(id, t)| {
+                self.alias_edges(t, id, &format!("alias.{id}"))
+                    .1
+                    .into_iter()
+                    .map(move |e| (id.clone(), e))
+            })
+            .collect()
+    }
+
+    /// `topology`'s declared ports as ports of the node `node_id`, and an edge
+    /// from each to the port it aliases unless that lies inside the same node.
+    fn alias_edges(
+        &self,
+        topology: &Topology,
+        node_id: &str,
+        id_prefix: &str,
+    ) -> (Vec<Port>, Vec<Edge>) {
         let mut ports = Vec::new();
         let mut edges = Vec::new();
-        for port in declared_ports(self.a, self.topology, node_id) {
-            let Some(tp) = self.topology.port_map.get(&port.name) else {
+        for port in declared_ports(self.a, topology, node_id) {
+            let Some(tp) = topology.port_map.get(&port.name) else {
                 continue;
             };
             let Some(inner) = self.resolve_end(&tp.pii, port.index) else {
                 continue;
             };
+            if inner.id() == node_id {
+                ports.push(port);
+                continue;
+            }
             let implicit = matches!(inner, End::Node(_));
             let detail = if implicit {
                 underlying_label(self.a, tp.pii.clone(), port.index)
@@ -679,7 +735,7 @@ impl<'a> CollapsedScope<'a> {
                 ir::Direction::Output => (inner.id().to_string(), port.id.clone()),
             };
             edges.push(Edge {
-                id: format!("boundary.{}.{}", port.name, port.index),
+                id: format!("{id_prefix}.{}.{}", port.name, port.index),
                 from_port,
                 to_port,
                 graph_name: String::new(),

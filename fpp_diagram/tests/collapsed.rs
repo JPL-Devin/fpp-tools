@@ -493,11 +493,14 @@ fn collapsed_view_wires_an_instance_the_topology_declares_itself() {
         let e = edge(&d, "Sub.Subtopology", "Sub.inner.in2.0");
         assert!(e.implicit);
         assert_eq!(e.detail, "Sub.src.out -> Sub.inner.in2");
-        // `dataIn` aliases a visible instance's port; the declared port is still
-        // the way `Top` reaches it.
+        // `dataIn` aliases a visible instance's port: the declared port is still
+        // the way `Top` reaches it, and is joined to the port it names.
         let e = edge(&d, "outer.out.0", "Sub.Subtopology.dataIn.0");
         assert!(!e.implicit);
-        assert_eq!(d.edges.len(), 2);
+        let e = edge(&d, "Sub.Subtopology.dataIn.0", "Sub.inner.in.0");
+        assert_eq!(e.id, "alias.Sub.Subtopology.dataIn.0");
+        assert!(!e.implicit);
+        assert_eq!(d.edges.len(), 3);
     });
 }
 
@@ -524,6 +527,7 @@ instance top: Src base id 0x600
 topology A {
     instance a
     instance shared
+    port sharedIn = shared.in
     connections A { a.out -> shared.in }
 }
 
@@ -540,6 +544,7 @@ topology Inner {
 topology Mid {
     instance mid
     import Inner
+    port deepIn = deep.in
     connections M { mid.out -> deep.in }
 }
 
@@ -549,7 +554,10 @@ topology Parent {
     import B
     import Mid
     import Inner
-    connections C { top.out -> deep.in }
+    connections C {
+        top.out -> deep.in
+        top.out -> A.sharedIn
+    }
 }
 "#;
 
@@ -578,6 +586,30 @@ fn collapsed_view_resolves_shared_and_nested_imports() {
         assert_eq!(e.detail, "mid.out -> deep.in");
         let e = edge(&d, "top.out.0", "Inner");
         assert!(e.implicit);
-        assert_eq!(d.edges.len(), 4);
+
+        // A declared port aliasing something outside its own node is joined to
+        // it: `A.sharedIn` to the visible `shared`, `Mid.deepIn` to `Inner`.
+        let e = edge(&d, "top.out.0", "A.sharedIn.0");
+        assert!(!e.implicit);
+        let e = edge(&d, "A.sharedIn.0", "shared.in.0");
+        assert_eq!(e.id, "alias.A.sharedIn.0");
+        assert!(!e.implicit);
+        let e = edge(&d, "Mid.deepIn.0", "Inner");
+        assert!(e.implicit);
+        assert_eq!(e.detail, "deep.in");
+        assert_eq!(d.edges.len(), 7);
+
+        // A group view keeps such an alias edge only when both ends are drawn.
+        let g = fpp_diagram::lower_view(
+            a,
+            DiagramKind::ConnectionGroup,
+            "Parent.C",
+            TopologyView::Collapsed,
+        )
+        .unwrap();
+        assert_eq!(node_ids(&g), ["shared", "top"]);
+        edge(&g, "A.sharedIn.0", "shared.in.0");
+        assert!(g.edges.iter().all(|e| e.id != "alias.Mid.deepIn.0"));
+        assert_eq!(g.edges.len(), 3);
     });
 }
