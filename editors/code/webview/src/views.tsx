@@ -4,7 +4,7 @@ import { injectable } from 'inversify';
 import { VNode } from 'snabbdom';
 import { IView, IViewArgs, PolylineEdgeView, RenderingContext, SEdgeImpl, SLabelImpl, SLabelView, SNodeImpl, SPortImpl } from 'sprotty';
 import { Point, Selectable } from 'sprotty-protocol';
-import { ComponentSNode, PortSNode } from '../../common/models';
+import { BoundarySNode, ComponentSNode, FppSEdge, PortSNode } from '../../common/models';
 
 @injectable()
 export class ComponentNodeView implements IView {
@@ -20,6 +20,47 @@ export class ComponentNodeView implements IView {
                 rx={10} // Rounded corner
             >
             </rect>
+            {context.renderChildren(node)}
+        </g>;
+    }
+}
+
+/** A collapsed imported topology: a dashed box carrying its declared ports. */
+@injectable()
+export class TopologyNodeView implements IView {
+    render(node: Readonly<SNodeImpl & Selectable>, context: RenderingContext): VNode {
+        return <g>
+            <rect class-sprotty-node={true} class-topology-node={true}
+                class-selected={node.selected}
+                width={node.size.width}
+                height={node.size.height}
+                rx={4}
+            >
+            </rect>
+            {context.renderChildren(node)}
+        </g>;
+    }
+}
+
+/**
+ * A declared port of the diagrammed topology, on the diagram boundary: a
+ * chevron pointing the way data flows (into the diagram for inputs, out for
+ * outputs).
+ */
+@injectable()
+export class BoundaryNodeView implements IView {
+    render(node: Readonly<SNodeImpl & BoundarySNode & Selectable>, context: RenderingContext): VNode {
+        const w = node.size.width;
+        const h = node.size.height;
+        const tip = Math.min(10, h / 2);
+        const chevron = `0,0 ${w - tip},0 ${w},${h / 2} ${w - tip},${h} 0,${h} ${tip},${h / 2}`;
+        return <g>
+            <polygon points={chevron}
+                class-sprotty-node={true} class-boundary-port={true}
+                class-boundary-input={!node.isOutput}
+                class-boundary-output={node.isOutput}
+                class-selected={node.selected}
+            />
             {context.renderChildren(node)}
         </g>;
     }
@@ -73,7 +114,7 @@ export class RightAlignedLabelView extends SLabelView {
 
 @injectable()
 export class ArrowEdgeView extends PolylineEdgeView {
-    override renderLine(edge: SEdgeImpl & { detail?: string }, segments: Point[], context: RenderingContext, args?: IViewArgs): VNode {
+    override renderLine(edge: SEdgeImpl & FppSEdge, segments: Point[], context: RenderingContext, args?: IViewArgs): VNode {
         const firstPoint = segments[0];
         let path = `M ${firstPoint.x},${firstPoint.y}`;
         for (let i = 1; i < segments.length; i++) {
@@ -97,6 +138,7 @@ export class ArrowEdgeView extends PolylineEdgeView {
             </marker>
             <path
                 d={path}
+                class-edge-implicit={edge.implicit === true}
                 marker-end="url(#arrow)"
             />
         </g>

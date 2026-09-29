@@ -76,6 +76,7 @@ export class FppWebviewPanelManager extends WebviewPanelManager {
                 kind: kind as unknown as lsp_ext.DiagramKind,
                 name: this.diagramConfig.fullyQualifiedName,
                 hideUnusedPorts: this.diagramConfig.hideUnusedPorts,
+                topologyView: this.diagramConfig.collapseSubtopologies ? "collapsed" : "flattened",
             });
             return model as SGraph;
         } catch (e) {

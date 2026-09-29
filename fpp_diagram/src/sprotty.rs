@@ -8,7 +8,7 @@
 //! nodes/ports get fixed label sizes but no positions — layout (ELK) runs in the
 //! JS host. See `docs/visualization-work-to-go.md` §2.1.
 
-use crate::ir::{Diagram, Direction, Node, Port};
+use crate::ir::{Diagram, Direction, Node, Port, TopologyNode};
 use serde::{Deserialize, Serialize};
 
 /// Fixed label/port sizes, mirroring the legacy `generator.ts`. Because these
@@ -81,12 +81,37 @@ pub enum SModelElement {
         text: String,
         size: Dimension,
     },
+    /// A collapsed imported topology node (collapsed topology view).
+    #[serde(rename = "node:topology", rename_all = "camelCase")]
+    TopologyNode {
+        id: String,
+        children: Vec<SModelElement>,
+    },
+    /// A declared port of the diagrammed topology, drawn on the diagram
+    /// boundary (collapsed topology view). It is a node, not a port, so that
+    /// ELK can pin it to the first (input) or last (output) layer.
+    #[serde(rename = "node:boundary", rename_all = "camelCase")]
+    BoundaryNode {
+        id: String,
+        /// FPP extra: the underlying port kind; drives styling.
+        kind: String,
+        /// FPP extra: outputs are pinned to the last layer, inputs to the first.
+        is_output: bool,
+        children: Vec<SModelElement>,
+    },
     /// A connection edge.
     #[serde(rename = "edge", rename_all = "camelCase")]
     Edge {
         id: String,
         source_id: String,
         target_id: String,
+        /// FPP extra: the edge ends on a collapsed topology node's boundary
+        /// rather than a rendered port; drawn dashed.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        implicit: bool,
+        /// Hover text; empty if none. Rendered as an SVG `<title>`.
+        #[serde(default, skip_serializing_if = "String::is_empty")]
+        detail: String,
     },
 
     // --- state machine elements ---
@@ -152,10 +177,14 @@ pub struct EdgePlacement {
 /// Lower a diagram IR into a sprotty `SModel` root graph.
 pub fn to_smodel(diagram: &Diagram) -> SModelElement {
     let mut children: Vec<SModelElement> = diagram.nodes.iter().map(node_to_smodel).collect();
+    children.extend(diagram.topology_nodes.iter().map(topology_node_to_smodel));
+    children.extend(diagram.boundary_ports.iter().map(boundary_port_to_smodel));
     children.extend(diagram.edges.iter().map(|e| SModelElement::Edge {
         id: e.id.clone(),
         source_id: e.from_port.clone(),
         target_id: e.to_port.clone(),
+        implicit: e.implicit,
+        detail: e.detail.clone(),
     }));
 
     SModelElement::Graph {
@@ -390,6 +419,40 @@ fn node_to_smodel(node: &Node) -> SModelElement {
         id: node.id.clone(),
         kind: component_kind_str(node.kind).to_string(),
         children,
+    }
+}
+
+fn topology_node_to_smodel(node: &TopologyNode) -> SModelElement {
+    let mut children = vec![
+        SModelElement::ComponentLabel {
+            id: format!("{}.label.name", node.id),
+            text: node.name.clone(),
+            size: size::COMPONENT_LABEL.into(),
+        },
+        SModelElement::ComponentLabel {
+            id: format!("{}.label.class", node.id),
+            text: format!("topology {}", node.qualified_name),
+            size: size::COMPONENT_LABEL.into(),
+        },
+    ];
+    children.extend(node.ports.iter().map(port_to_smodel));
+    SModelElement::TopologyNode {
+        id: node.id.clone(),
+        children,
+    }
+}
+
+fn boundary_port_to_smodel(port: &Port) -> SModelElement {
+    let label = SModelElement::ComponentLabel {
+        id: format!("{}.label", port.id),
+        text: port.label.clone(),
+        size: text_size(&port.label),
+    };
+    SModelElement::BoundaryNode {
+        id: port.id.clone(),
+        kind: port_kind_str(&port.kind),
+        is_output: matches!(port.direction, Direction::Output),
+        children: vec![label],
     }
 }
 

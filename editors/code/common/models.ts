@@ -5,10 +5,21 @@
  * (`kind` on component nodes, `kind`/`isOutput` on ports) and are shared between
  * the extension host and the webview.
  */
-import type { SNode, SPort } from "sprotty-protocol";
+import type { SEdge, SNode, SPort } from "sprotty-protocol";
 
 export interface ComponentSNode extends SNode {
     kind: string
+}
+
+/** A declared port of the diagrammed topology, drawn on the diagram boundary. */
+export interface BoundarySNode extends SNode {
+    kind: string,
+    isOutput: boolean, // Outputs are pinned to the last ELK layer, inputs to the first.
+}
+
+export interface FppSEdge extends SEdge {
+    implicit?: boolean, // Ends on a collapsed topology's boundary rather than a rendered port.
+    detail?: string,    // Hover text.
 }
 
 export interface PortSNode extends SPort {

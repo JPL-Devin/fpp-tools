@@ -24,6 +24,13 @@ export type DiagramParams = {
      * full flattened executed action sequence. Defaults to `"uml"` when omitted.
      */
     transitionActionMode?: "uml" | "flattened",
+    /**
+     * How imported topologies are drawn (topology and connection-group diagrams
+     * only). `"flattened"` makes every component instance a node; `"collapsed"`
+     * draws each directly imported topology as one node with its declared
+     * ports. Defaults to `"flattened"` when omitted.
+     */
+    topologyView?: "flattened" | "collapsed",
 };
 
 /**

@@ -127,12 +127,13 @@ pub fn handle_diagram(
         .map(serde_json::Value::String)
         .map_err(|e| anyhow::anyhow!("{e}"));
     }
-    fpp_diagram::lower_to_smodel(
+    fpp_diagram::lower_to_smodel_view(
         &state.analysis,
         params.kind.into(),
         &params.name,
         params.hide_unused_ports,
         params.transition_action_mode.into(),
+        params.topology_view.into(),
     )
     .map_err(|e| anyhow::anyhow!("{e}"))
 }

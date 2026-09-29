@@ -2,7 +2,7 @@ import { LayoutOptions } from "elkjs";
 import { DefaultLayoutConfigurator } from "sprotty-elk";
 import { SGraph, SEdge, SNode, SLabel } from 'sprotty-protocol';
 import { SModelIndex } from "sprotty-protocol";
-import { PortSNode } from "../../common/models";
+import { BoundarySNode, PortSNode } from "../../common/models";
 
 /**
  * The kinds of diagram the extension can request from the language server.
@@ -21,6 +21,7 @@ export class FppDiagramConfig extends DefaultLayoutConfigurator {
 
     // Stateful diagram options
     public hideUnusedPorts = true;                      // By default, hide unused ports.
+    public collapseSubtopologies = false;               // By default, flatten imported topologies into the diagram.
     public currentDiagramType: DiagramType | undefined; // Current diagram type
     public fullyQualifiedName: string = "";             // Fully qualified name of the element currently displayed
 
@@ -103,11 +104,25 @@ export class FppDiagramConfig extends DefaultLayoutConfigurator {
                 'elk.padding': '[top=8,left=10,bottom=8,right=10]',
             };
         }
+        if (snode.type === 'node:boundary') {
+            // A boundary port of the diagrammed topology: pin inputs to the first
+            // layer and outputs to the last so they sit on the diagram's edge.
+            const isOutput = (snode as BoundarySNode).isOutput;
+            return {
+                'elk.layered.layerConstraint': isOutput ? 'LAST_SEPARATE' : 'FIRST_SEPARATE',
+                'elk.nodeLabels.placement': 'INSIDE, H_CENTER, V_CENTER',
+                'elk.nodeSize.constraints': 'NODE_LABELS, MINIMUM_SIZE',
+                'elk.nodeSize.minimum': '(40, 22)',
+                'elk.padding': '[top=4,left=14,bottom=4,right=14]',
+            };
+        }
         return {
             "elk.nodeLabels.placement": "INSIDE, H_CENTER, V_CENTER",
             "elk.portLabels.nextToPortIfPossible": 'true',
             'elk.portConstraints': 'FIXED_SIDE', // So that elk.port.side can take effect.
             "elk.nodeSize.constraints": "PORTS, PORT_LABELS, NODE_LABELS, MINIMUM_SIZE",
+            // Collapsed topologies stand in for several components; keep them boxy.
+            ...(snode.type === 'node:topology' ? { 'elk.nodeSize.minimum': '(180, 90)' } : {}),
         };
     }
 

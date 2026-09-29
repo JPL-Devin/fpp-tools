@@ -78,6 +78,35 @@ tspan {
     stroke: #fe92a8;
 }
 
+/* A collapsed imported topology: dashed outline marks a boundary, not a component. */
+.topology-node {
+    fill: var(--vscode-editor-inactiveSelectionBackground);
+    stroke: var(--vscode-foreground);
+    stroke-width: 1.5;
+    stroke-dasharray: 8 4;
+}
+
+/* A declared port of the diagrammed topology, on the diagram boundary. */
+.boundary-port {
+    stroke: var(--vscode-foreground);
+    stroke-width: 1;
+}
+
+.boundary-input {
+    fill: var(--vscode-charts-blue);
+}
+
+.boundary-output {
+    fill: var(--vscode-charts-orange);
+}
+
+/* An implicit connection: it crosses a collapsed topology's boundary rather than
+   ending on a rendered port. */
+.sprotty-edge>path.edge-implicit {
+    stroke-dasharray: 5 4;
+    opacity: 0.85;
+}
+
 .port-sync {
     /* Red expresses the notion of "caution", because the component is synchronous. */
     fill: #fe92a8;

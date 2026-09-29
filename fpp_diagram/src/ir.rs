@@ -46,6 +46,23 @@ pub enum TransitionActionMode {
     Flattened,
 }
 
+/// How a topology diagram treats the topologies imported into the diagrammed
+/// topology.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TopologyView {
+    /// Every component instance is a node, including those brought in by
+    /// imported topologies (the default).
+    #[default]
+    Flattened,
+    /// Each directly imported topology is a single collapsed node exposing its
+    /// declared topology ports, and the diagrammed topology's own declared
+    /// ports are drawn as boundary ports. Connections that reach into an
+    /// imported topology without going through one of its declared ports are
+    /// drawn as implicit edges ending on the collapsed node's boundary.
+    Collapsed,
+}
+
 /// The kind of a component, which drives node styling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -140,20 +157,48 @@ pub struct Node {
     pub ports: Vec<Port>,
 }
 
+/// A directly imported topology drawn as a single collapsed node
+/// ([`TopologyView::Collapsed`] only).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyNode {
+    /// Stable identifier: the qualified topology name.
+    pub id: String,
+    /// The unqualified topology name.
+    pub name: String,
+    /// The fully qualified topology name.
+    pub qualified_name: String,
+    /// The topology's declared ports (`port x = inst.p`), expanded per index.
+    pub ports: Vec<Port>,
+}
+
 /// A connection between two ports in the diagram.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Edge {
     /// Stable identifier.
     pub id: String,
-    /// The source port id (an output port). Matches a [`Port::id`].
+    /// The source port id (an output port). Matches a [`Port::id`]; for an
+    /// implicit edge it may instead be a [`TopologyNode::id`].
     pub from_port: String,
-    /// The target port id (an input port). Matches a [`Port::id`].
+    /// The target port id (an input port). Matches a [`Port::id`]; for an
+    /// implicit edge it may instead be a [`TopologyNode::id`].
     pub to_port: String,
-    /// The connection graph (group) name this edge belongs to.
+    /// The connection graph (group) name this edge belongs to. Empty for the
+    /// edges joining a boundary port to the port it aliases.
     pub graph_name: String,
     /// Whether this connection is declared `unmatched`.
     pub unmatched: bool,
+    /// Whether an endpoint reaches into a collapsed topology without going
+    /// through one of its declared ports. Such an endpoint is the collapsed
+    /// node's id, and the edge is drawn onto the node's boundary rather than a
+    /// rendered port.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub implicit: bool,
+    /// Hover text naming the underlying component ports the edge stands for
+    /// (one connection per line); empty when the endpoints already say so.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub detail: String,
 }
 
 /// A complete diagram in intermediate form.
@@ -165,6 +210,14 @@ pub struct Diagram {
     pub name: String,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
+    /// Collapsed imported topologies ([`TopologyView::Collapsed`] only).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub topology_nodes: Vec<TopologyNode>,
+    /// The diagrammed topology's own declared ports, drawn on the diagram
+    /// boundary ([`TopologyView::Collapsed`] only). Their ids are
+    /// `<topology>.<port name>.<index>`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boundary_ports: Vec<Port>,
 }
 
 impl Port {
@@ -179,7 +232,9 @@ impl Diagram {
     ///
     /// This is the IR-level equivalent of the legacy "hide unused ports" toggle.
     /// It is a no-op for [`DiagramKind::Component`] diagrams, which have no edges
-    /// and are meant to show a component's full port surface.
+    /// and are meant to show a component's full port surface. The declared
+    /// ports of collapsed topology nodes are always kept: they are the
+    /// interface the collapsed view exists to show.
     pub fn prune_unused_ports(&mut self) {
         if self.kind == DiagramKind::Component {
             return;

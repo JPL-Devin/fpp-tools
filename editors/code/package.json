@@ -90,6 +90,12 @@
                 "category": "FPP Diagram"
             },
             {
+                "command": "fpp.diagram.toggle-collapsed-subtopologies",
+                "title": "FPP: Toggle Collapsed Subtopologies",
+                "icon": "$(group-by-ref-type)",
+                "category": "FPP Diagram"
+            },
+            {
                 "command": "fpp.stateMachine.fit",
                 "title": "FPP: Fit State Machine Diagram",
                 "icon": "$(arrow-both)",
@@ -175,6 +181,11 @@
                 },
                 {
                     "command": "fpp.diagram.toggle-unused-ports",
+                    "when": "activeWebviewPanelId == 'fppDiagrams'",
+                    "group": "navigation"
+                },
+                {
+                    "command": "fpp.diagram.toggle-collapsed-subtopologies",
                     "when": "activeWebviewPanelId == 'fppDiagrams'",
                     "group": "navigation"
                 },

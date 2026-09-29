@@ -9,7 +9,7 @@ use std::io::Read;
 use std::process::exit;
 
 use clap::{Parser, ValueEnum};
-use fpp_diagram::{DiagramKind, TransitionActionMode};
+use fpp_diagram::{DiagramKind, TopologyView, TransitionActionMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum ModeArg {
@@ -26,6 +26,27 @@ impl From<ModeArg> for TransitionActionMode {
         match m {
             ModeArg::Uml => TransitionActionMode::Uml,
             ModeArg::Flattened => TransitionActionMode::Flattened,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ViewArg {
+    /// Every component instance is a node, including those of imported
+    /// topologies.
+    Flattened,
+    /// Directly imported topologies are single collapsed nodes exposing their
+    /// declared ports; the topology's own declared ports are drawn on the
+    /// boundary; connections reaching into an imported topology are drawn as
+    /// implicit edges onto its boundary.
+    Collapsed,
+}
+
+impl From<ViewArg> for TopologyView {
+    fn from(v: ViewArg) -> Self {
+        match v {
+            ViewArg::Flattened => TopologyView::Flattened,
+            ViewArg::Collapsed => TopologyView::Collapsed,
         }
     }
 }
@@ -82,6 +103,11 @@ struct Args {
     /// Prune ports not referenced by any connection (topology diagrams only).
     #[arg(long)]
     hide_unused_ports: bool,
+
+    /// How imported topologies are drawn (topology and connection-group
+    /// diagrams only).
+    #[arg(long, value_enum, default_value_t = ViewArg::Flattened)]
+    view: ViewArg,
 
     /// The FPP source file to read. Reads from stdin when omitted.
     file: Option<String>,
@@ -141,6 +167,7 @@ fn main() {
 fn lower(a: &fpp_analysis::Analysis, args: &Args) -> Result<String, fpp_diagram::LowerError> {
     let kind: DiagramKind = args.kind.into();
     let mode: TransitionActionMode = args.mode.into();
+    let view: TopologyView = args.view.into();
 
     match args.format {
         FormatArg::Mermaid if kind == DiagramKind::StateMachine => {
@@ -149,13 +176,25 @@ fn lower(a: &fpp_analysis::Analysis, args: &Args) -> Result<String, fpp_diagram:
         FormatArg::Mermaid => {
             // Mermaid is only implemented for state machines; other kinds fall
             // back to sprotty JSON.
-            let json =
-                fpp_diagram::lower_to_smodel(a, kind, &args.name, args.hide_unused_ports, mode)?;
+            let json = fpp_diagram::lower_to_smodel_view(
+                a,
+                kind,
+                &args.name,
+                args.hide_unused_ports,
+                mode,
+                view,
+            )?;
             Ok(json.to_string())
         }
         FormatArg::Sprotty => {
-            let json =
-                fpp_diagram::lower_to_smodel(a, kind, &args.name, args.hide_unused_ports, mode)?;
+            let json = fpp_diagram::lower_to_smodel_view(
+                a,
+                kind,
+                &args.name,
+                args.hide_unused_ports,
+                mode,
+                view,
+            )?;
             Ok(json.to_string())
         }
     }

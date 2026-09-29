@@ -3,7 +3,7 @@ import '../css/diagram.css';
 
 import { Container, ContainerModule } from 'inversify';
 import { boundsFeature, configureModelElement, configureViewerOptions, editFeature, layoutableChildFeature, loadDefaultModules, moveFeature, overrideViewerOptions, SEdgeImpl, SGraphImpl, SGraphView, SLabelImpl, SLabelView, SNodeImpl, SPortImpl, SRoutingHandleImpl, SRoutingHandleView } from 'sprotty';
-import { ArrowEdgeView, ChoiceNodeView, ComponentNodeView, InitialNodeView, MultiLineLabelView, RectanglePortView, StateNodeView } from './views';
+import { ArrowEdgeView, BoundaryNodeView, ChoiceNodeView, ComponentNodeView, InitialNodeView, MultiLineLabelView, RectanglePortView, StateNodeView, TopologyNodeView } from './views';
 
 const myModule = new ContainerModule((bind, unbind, isBound, rebind) => {
     const context = { bind, unbind, isBound, rebind };
@@ -11,6 +11,9 @@ const myModule = new ContainerModule((bind, unbind, isBound, rebind) => {
 
     // Component / topology (port-based) diagrams.
     configureModelElement(context, 'node:component', SNodeImpl, ComponentNodeView, { enable: [layoutableChildFeature], disable: [moveFeature] });
+    // Collapsed topology view: imported topologies as one node, own ports on the boundary.
+    configureModelElement(context, 'node:topology', SNodeImpl, TopologyNodeView, { enable: [layoutableChildFeature], disable: [moveFeature] });
+    configureModelElement(context, 'node:boundary', SNodeImpl, BoundaryNodeView, { enable: [layoutableChildFeature], disable: [moveFeature] });
     configureModelElement(context, 'label:node:component', SLabelImpl, SLabelView);
     configureModelElement(context, 'port', SPortImpl, RectanglePortView, { disable: [boundsFeature] }); // By default, boundsFeature is enabled for SPort. We want fixed-size ports so this feature needs to be disabled.
     configureModelElement(context, 'label:port', SLabelImpl, SLabelView);
