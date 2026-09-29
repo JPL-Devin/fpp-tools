@@ -613,3 +613,73 @@ fn collapsed_view_resolves_shared_and_nested_imports() {
         assert_eq!(g.edges.len(), 3);
     });
 }
+
+/// `A` re-exports a port of the `B` it imports, which in turn names `shared`;
+/// `Parent` imports both and declares `shared` itself.
+const CHAINED_ALIAS_MODEL: &str = r#"
+port P
+
+passive component Src {
+    output port out: P
+}
+
+passive component Sink {
+    sync input port in: P
+}
+
+instance shared: Sink base id 0x100
+instance source: Src base id 0x200
+instance other: Src base id 0x300
+
+topology B {
+    instance shared
+    port in = shared.in
+}
+
+topology A {
+    import B
+    port in = B.in
+}
+
+topology Parent {
+    instance source
+    instance other
+    instance shared
+    import A
+    import B
+    connections C { source.out -> A.in }
+    connections D { other.out -> shared.in }
+}
+"#;
+
+#[test]
+fn collapsed_connection_group_follows_alias_chains() {
+    with_analysis(CHAINED_ALIAS_MODEL, |a| {
+        let g = fpp_diagram::lower_view(
+            a,
+            DiagramKind::ConnectionGroup,
+            "Parent.C",
+            TopologyView::Collapsed,
+        )
+        .unwrap();
+        let topology_ids: Vec<&str> = g.topology_nodes.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(topology_ids, ["A", "B"]);
+        assert_eq!(node_ids(&g), ["shared", "source"]);
+        edge(&g, "source.out.0", "A.in.0");
+        edge(&g, "A.in.0", "B.in.0");
+        edge(&g, "B.in.0", "shared.in.0");
+        assert_eq!(g.edges.len(), 3);
+
+        // A group not touching the imports draws none of the chain.
+        let g = fpp_diagram::lower_view(
+            a,
+            DiagramKind::ConnectionGroup,
+            "Parent.D",
+            TopologyView::Collapsed,
+        )
+        .unwrap();
+        assert!(g.topology_nodes.is_empty());
+        assert_eq!(node_ids(&g), ["other", "shared"]);
+        assert_eq!(g.edges.len(), 1);
+    });
+}

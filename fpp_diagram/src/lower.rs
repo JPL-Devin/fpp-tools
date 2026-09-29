@@ -161,16 +161,23 @@ pub fn lower_connection_group_view(
         TopologyView::Collapsed => {
             let scope = CollapsedScope::new(a, topology);
             let mut touched = scope.touched(Some(group));
-            // A declared port of a drawn collapsed node brings in what it aliases.
-            let alias_edges: Vec<Edge> = scope
-                .import_alias_edges()
-                .into_iter()
-                .filter(|(import, _)| touched.contains(import))
-                .map(|(_, e)| e)
-                .collect();
-            for e in &alias_edges {
-                touched.insert(scope.node_of(&e.from_port).to_string());
-                touched.insert(scope.node_of(&e.to_port).to_string());
+            // A declared port of a drawn collapsed node brings in what it
+            // aliases, which may be another collapsed node with aliases of its own.
+            let mut pending = scope.import_alias_edges();
+            let mut alias_edges: Vec<Edge> = Vec::new();
+            loop {
+                let (drawn, rest): (Vec<_>, Vec<_>) = pending
+                    .into_iter()
+                    .partition(|(import, _)| touched.contains(import));
+                if drawn.is_empty() {
+                    break;
+                }
+                for (_, e) in drawn {
+                    touched.insert(scope.node_of(&e.from_port).to_string());
+                    touched.insert(scope.node_of(&e.to_port).to_string());
+                    alias_edges.push(e);
+                }
+                pending = rest;
             }
             let nodes = scope
                 .component_nodes()
