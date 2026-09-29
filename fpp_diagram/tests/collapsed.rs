@@ -411,3 +411,173 @@ fn cli_view_switch_selects_the_collapsed_view() {
         2
     );
 }
+
+#[test]
+fn collapsed_view_of_imported_connection_group_keeps_its_topology_node() {
+    with_analysis(MODEL, |a| {
+        // `Internal` is defined in the subtopology; in `Top`'s collapsed view
+        // its wiring lies wholly inside the collapsed node, which is still
+        // drawn so the group has a home.
+        let d = fpp_diagram::lower_view(
+            a,
+            DiagramKind::ConnectionGroup,
+            "Top.Internal",
+            TopologyView::Collapsed,
+        )
+        .unwrap();
+        assert!(d.nodes.is_empty());
+        assert_eq!(d.topology_nodes.len(), 1);
+        assert_eq!(d.topology_nodes[0].id, "Sub.Subtopology");
+        assert!(d.edges.is_empty());
+
+        let flattened =
+            fpp_diagram::lower(a, DiagramKind::ConnectionGroup, "Top.Internal").unwrap();
+        assert_eq!(node_ids(&flattened), ["Sub.inner", "Sub.src"]);
+        assert_eq!(flattened.edges.len(), 1);
+    });
+}
+
+/// `Top` also declares `Sub.inner` itself, so the instance stays a node of its
+/// own in the collapsed view and the subtopology's wiring to it must show.
+const REUSED_INSTANCE_MODEL: &str = r#"
+port P
+
+passive component Src {
+    output port out: P
+}
+
+passive component Sink {
+    sync input port in: P
+    sync input port in2: P
+}
+
+module Sub {
+    instance src: Src base id 0x100
+    instance inner: Sink base id 0x200
+
+    topology Subtopology {
+        instance src
+        instance inner
+
+        port dataIn = inner.in
+
+        connections Internal {
+            src.out -> inner.in2
+        }
+    }
+}
+
+instance outer: Src base id 0x300
+
+topology Top {
+    instance outer
+    instance Sub.inner
+    instance Sub.Subtopology
+
+    connections C {
+        outer.out -> Sub.Subtopology.dataIn
+    }
+}
+"#;
+
+#[test]
+fn collapsed_view_wires_an_instance_the_topology_declares_itself() {
+    with_analysis(REUSED_INSTANCE_MODEL, |a| {
+        let d = fpp_diagram::lower_view(a, DiagramKind::Topology, "Top", TopologyView::Collapsed)
+            .unwrap();
+        assert_eq!(node_ids(&d), ["Sub.inner", "outer"]);
+        assert_eq!(d.topology_nodes.len(), 1);
+
+        // The imported connection crosses out of the collapsed node into the
+        // visible instance.
+        let e = edge(&d, "Sub.Subtopology", "Sub.inner.in2.0");
+        assert!(e.implicit);
+        assert_eq!(e.detail, "Sub.src.out -> Sub.inner.in2");
+        // `dataIn` aliases a visible instance's port; the declared port is still
+        // the way `Top` reaches it.
+        let e = edge(&d, "outer.out.0", "Sub.Subtopology.dataIn.0");
+        assert!(!e.implicit);
+        assert_eq!(d.edges.len(), 2);
+    });
+}
+
+/// `Parent` imports two unrelated topologies `A` and `B` that both contain
+/// `shared`, plus `Mid` and the `Inner` it imports in turn.
+const SHARED_AND_NESTED_MODEL: &str = r#"
+port P
+
+passive component Src {
+    output port out: P
+}
+
+passive component Sink {
+    sync input port in: P
+}
+
+instance shared: Sink base id 0x100
+instance a: Src base id 0x200
+instance b: Src base id 0x300
+instance mid: Src base id 0x400
+instance deep: Sink base id 0x500
+instance top: Src base id 0x600
+
+topology A {
+    instance a
+    instance shared
+    connections A { a.out -> shared.in }
+}
+
+topology B {
+    instance b
+    instance shared
+    connections B { b.out -> shared.in }
+}
+
+topology Inner {
+    instance deep
+}
+
+topology Mid {
+    instance mid
+    import Inner
+    connections M { mid.out -> deep.in }
+}
+
+topology Parent {
+    instance top
+    import A
+    import B
+    import Mid
+    import Inner
+    connections C { top.out -> deep.in }
+}
+"#;
+
+#[test]
+fn collapsed_view_resolves_shared_and_nested_imports() {
+    with_analysis(SHARED_AND_NESTED_MODEL, |a| {
+        let d =
+            fpp_diagram::lower_view(a, DiagramKind::Topology, "Parent", TopologyView::Collapsed)
+                .unwrap();
+        let topology_ids: Vec<&str> = d.topology_nodes.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(topology_ids, ["A", "B", "Inner", "Mid"]);
+
+        // `shared` belongs to two unrelated imports, so it is drawn on its own
+        // and both reach it.
+        assert_eq!(node_ids(&d), ["shared", "top"]);
+        let e = edge(&d, "A", "shared.in.0");
+        assert!(e.implicit);
+        assert_eq!(e.detail, "a.out -> shared.in");
+        let e = edge(&d, "B", "shared.in.0");
+        assert!(e.implicit);
+
+        // `deep` belongs to the innermost import containing it, `Inner`, not to
+        // `Mid`; `Mid`'s wiring to it crosses between the two collapsed nodes.
+        let e = edge(&d, "Mid", "Inner");
+        assert!(e.implicit);
+        assert_eq!(e.detail, "mid.out -> deep.in");
+        let e = edge(&d, "top.out.0", "Inner");
+        assert!(e.implicit);
+        assert_eq!(d.edges.len(), 4);
+    });
+}

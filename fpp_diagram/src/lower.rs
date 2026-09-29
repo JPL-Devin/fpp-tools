@@ -140,37 +140,37 @@ pub fn lower_connection_group_view(
         });
     }
 
+    // Keep only the nodes that participate in this group; a collapsed node
+    // participates even when the group's wiring lies wholly inside it.
     let (edges, nodes, topology_nodes) = match view {
         TopologyView::Flattened => {
             let edges = topology_edges(a, topology, Some(group));
-            (edges, instance_nodes(a, topology), vec![])
+            let used_nodes: FxHashSet<&str> = edges
+                .iter()
+                .flat_map(|e| [node_id_of_port(&e.from_port), node_id_of_port(&e.to_port)])
+                .collect();
+            let nodes = instance_nodes(a, topology)
+                .into_iter()
+                .filter(|n| used_nodes.contains(n.id.as_str()))
+                .collect();
+            (edges, nodes, vec![])
         }
         TopologyView::Collapsed => {
             let scope = CollapsedScope::new(a, topology);
-            (
-                scope.edges(Some(group)),
-                scope.component_nodes(),
-                scope.topology_nodes(),
-            )
+            let touched = scope.touched(Some(group));
+            let nodes = scope
+                .component_nodes()
+                .into_iter()
+                .filter(|n| touched.contains(&n.id))
+                .collect();
+            let topology_nodes = scope
+                .topology_nodes()
+                .into_iter()
+                .filter(|n| touched.contains(&n.id))
+                .collect();
+            (scope.edges(Some(group)), nodes, topology_nodes)
         }
     };
-
-    // Keep only the nodes that participate in this group. An endpoint is a port
-    // id, or a collapsed node id for an implicit edge.
-    let used_nodes: FxHashSet<&str> = edges
-        .iter()
-        .flat_map(|e| [e.from_port.as_str(), e.to_port.as_str()])
-        .flat_map(|id| [id, node_id_of_port(id)])
-        .collect();
-
-    let nodes = nodes
-        .into_iter()
-        .filter(|n| used_nodes.contains(n.id.as_str()))
-        .collect();
-    let topology_nodes = topology_nodes
-        .into_iter()
-        .filter(|n| used_nodes.contains(n.id.as_str()))
-        .collect();
 
     Ok(Diagram {
         kind: DiagramKind::ConnectionGroup,
@@ -408,9 +408,15 @@ impl End {
     }
 }
 
-/// What the collapsed view of a topology draws: its direct component instances
-/// as nodes, and each directly imported topology as one collapsed node that
-/// stands in for every component instance it brings in.
+/// What the collapsed view of a topology draws: each directly imported topology
+/// as one collapsed node standing in for the component instances it owns, and
+/// every other component instance as a node of its own.
+///
+/// An instance is owned by the innermost directly imported topology containing
+/// it: of the imports that contain it, those importing another such import are
+/// ruled out. An instance the diagrammed topology declares itself, or that two
+/// unrelated imports both contain, has no single owner and stays visible as a
+/// node of its own, so nothing is hidden inside a box it does not belong to.
 struct CollapsedScope<'a> {
     a: &'a Analysis,
     topology: &'a Topology,
@@ -429,8 +435,6 @@ impl<'a> CollapsedScope<'a> {
             .map(|t| (t.qualified_name.clone(), t))
             .collect();
 
-        // An instance the topology declares itself stays a node of its own, even
-        // if an imported topology also brings it in.
         let direct: FxHashSet<&str> = topology
             .direct_component_instances
             .keys()
@@ -438,15 +442,42 @@ impl<'a> CollapsedScope<'a> {
             .map(|ci| ci.qualified_name.as_str())
             .collect();
 
-        let mut owner = FxHashMap::default();
-        for (id, imported_topology) in &imported {
+        // Imports containing each instance, innermost first.
+        let mut containing: FxHashMap<String, Vec<&Topology>> = FxHashMap::default();
+        for imported_topology in imported.values() {
             for ci in imported_topology.component_instance_map().into_keys() {
-                if direct.contains(ci.qualified_name.as_str()) {
-                    continue;
+                if !direct.contains(ci.qualified_name.as_str()) {
+                    containing
+                        .entry(ci.qualified_name)
+                        .or_default()
+                        .push(imported_topology);
                 }
-                owner.entry(ci.qualified_name).or_insert_with(|| id.clone());
             }
         }
+        let imports = |t: &Topology, other: &Topology| -> bool {
+            t.transitive_import_set.iter().any(|sym| {
+                a.topology_map.get(sym).map(|d| d.qualified_name.as_str())
+                    == Some(&other.qualified_name)
+            })
+        };
+        let owner = containing
+            .into_iter()
+            .filter_map(|(instance, candidates)| {
+                let innermost: Vec<&Topology> = candidates
+                    .iter()
+                    .copied()
+                    .filter(|c| {
+                        !candidates
+                            .iter()
+                            .any(|o| !std::ptr::eq(*c, *o) && imports(c, o))
+                    })
+                    .collect();
+                match innermost.as_slice() {
+                    [only] => Some((instance, only.qualified_name.clone())),
+                    _ => None,
+                }
+            })
+            .collect();
 
         CollapsedScope {
             a,
@@ -509,19 +540,45 @@ impl<'a> CollapsedScope<'a> {
         }
     }
 
-    /// Edges for the topology's own connections (not those of imported
-    /// topologies, which lie inside collapsed nodes). When `only_group` is
+    /// The connection graphs to draw: all of them, or just `only_group`.
+    fn graphs(
+        &self,
+        only_group: Option<&str>,
+    ) -> impl Iterator<Item = (&String, &Vec<Connection>)> {
+        self.topology
+            .connection_map
+            .iter()
+            .filter(move |(graph_name, _)| only_group.is_none_or(|g| g == graph_name.as_str()))
+    }
+
+    /// Ids of the nodes the connections of the given graphs touch, including
+    /// collapsed nodes whose interior wiring they are.
+    fn touched(&self, only_group: Option<&str>) -> FxHashSet<String> {
+        self.graphs(only_group)
+            .flat_map(|(_, connections)| connections)
+            .flat_map(|c| {
+                let (from_index, to_index) = connection_indices(self.topology, c);
+                [
+                    self.resolve_end(&as_written(&c.from).port, from_index),
+                    self.resolve_end(&as_written(&c.to).port, to_index),
+                ]
+            })
+            .flatten()
+            .map(|end| match end {
+                End::Port(id) => node_id_of_port(&id).to_string(),
+                End::Node(id) => id,
+            })
+            .collect()
+    }
+
+    /// Edges for every connection of the topology, imported ones included,
+    /// except those lying wholly inside one collapsed node. When `only_group` is
     /// `Some`, only that named graph is included.
     fn edges(&self, only_group: Option<&str>) -> Vec<Edge> {
         let mut edges: Vec<Edge> = Vec::new();
         // Implicit edges drawn between the same two elements collapse into one.
         let mut by_ends: FxHashMap<(String, String), usize> = FxHashMap::default();
-        for (graph_name, connections) in &self.topology.local_connection_map {
-            if let Some(group) = only_group
-                && group != graph_name
-            {
-                continue;
-            }
+        for (graph_name, connections) in self.graphs(only_group) {
             for (seq, connection) in connections.iter().enumerate() {
                 let Some(edge) = self.connection_edge(graph_name, connection, seq) else {
                     continue;

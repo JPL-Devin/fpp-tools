@@ -102,7 +102,7 @@ tspan {
 
 /* An implicit connection: it crosses a collapsed topology's boundary rather than
    ending on a rendered port. */
-.sprotty-edge>path.edge-implicit {
+.sprotty-edge path.edge-implicit {
     stroke-dasharray: 5 4;
     opacity: 0.85;
 }
