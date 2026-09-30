@@ -9,7 +9,7 @@ use std::io::Read;
 use std::process::exit;
 
 use clap::{Parser, ValueEnum};
-use fpp_diagram::{DiagramKind, TransitionActionMode};
+use fpp_diagram::{DiagramKind, SmodelOptions, TopologyView, TransitionActionMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum ModeArg {
@@ -26,6 +26,27 @@ impl From<ModeArg> for TransitionActionMode {
         match m {
             ModeArg::Uml => TransitionActionMode::Uml,
             ModeArg::Flattened => TransitionActionMode::Flattened,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+enum ViewArg {
+    /// Every component instance is a node, including those of imported
+    /// topologies.
+    Flattened,
+    /// Directly imported topologies are single collapsed nodes exposing their
+    /// declared ports; the topology's own declared ports are drawn on the
+    /// boundary; connections reaching into an imported topology are drawn as
+    /// implicit edges onto its boundary.
+    Collapsed,
+}
+
+impl From<ViewArg> for TopologyView {
+    fn from(v: ViewArg) -> Self {
+        match v {
+            ViewArg::Flattened => TopologyView::Flattened,
+            ViewArg::Collapsed => TopologyView::Collapsed,
         }
     }
 }
@@ -82,6 +103,16 @@ struct Args {
     /// Prune ports not referenced by any connection (topology diagrams only).
     #[arg(long)]
     hide_unused_ports: bool,
+
+    /// How imported topologies are drawn (topology and connection-group
+    /// diagrams only).
+    #[arg(long, value_enum, default_value_t = ViewArg::Flattened)]
+    view: ViewArg,
+
+    /// Bundle parallel wires between the same two elements into one bus edge
+    /// carrying a wire count (topology and connection-group diagrams only).
+    #[arg(long)]
+    bundle_edges: bool,
 
     /// The FPP source file to read. Reads from stdin when omitted.
     file: Option<String>,
@@ -140,22 +171,25 @@ fn main() {
 /// Lower the requested element to its output string.
 fn lower(a: &fpp_analysis::Analysis, args: &Args) -> Result<String, fpp_diagram::LowerError> {
     let kind: DiagramKind = args.kind.into();
-    let mode: TransitionActionMode = args.mode.into();
+    let options = SmodelOptions {
+        hide_unused_ports: args.hide_unused_ports,
+        transition_action_mode: args.mode.into(),
+        topology_view: args.view.into(),
+        bundle_edges: args.bundle_edges,
+    };
 
     match args.format {
         FormatArg::Mermaid if kind == DiagramKind::StateMachine => {
-            fpp_diagram::lower_state_machine_to_mermaid(a, &args.name, mode)
+            fpp_diagram::lower_state_machine_to_mermaid(
+                a,
+                &args.name,
+                options.transition_action_mode,
+            )
         }
-        FormatArg::Mermaid => {
-            // Mermaid is only implemented for state machines; other kinds fall
-            // back to sprotty JSON.
-            let json =
-                fpp_diagram::lower_to_smodel(a, kind, &args.name, args.hide_unused_ports, mode)?;
-            Ok(json.to_string())
-        }
-        FormatArg::Sprotty => {
-            let json =
-                fpp_diagram::lower_to_smodel(a, kind, &args.name, args.hide_unused_ports, mode)?;
+        // Mermaid is only implemented for state machines; other kinds fall
+        // back to sprotty JSON.
+        FormatArg::Mermaid | FormatArg::Sprotty => {
+            let json = fpp_diagram::lower_to_smodel_with(a, kind, &args.name, options)?;
             Ok(json.to_string())
         }
     }

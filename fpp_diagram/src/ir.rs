@@ -46,6 +46,23 @@ pub enum TransitionActionMode {
     Flattened,
 }
 
+/// How a topology diagram treats the topologies imported into the diagrammed
+/// topology.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TopologyView {
+    /// Every component instance is a node, including those brought in by
+    /// imported topologies (the default).
+    #[default]
+    Flattened,
+    /// Each directly imported topology is a single collapsed node exposing its
+    /// declared topology ports, and the diagrammed topology's own declared
+    /// ports are drawn as boundary ports. Connections that reach into an
+    /// imported topology without going through one of its declared ports are
+    /// drawn as implicit edges ending on the collapsed node's boundary.
+    Collapsed,
+}
+
 /// The kind of a component, which drives node styling.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -140,20 +157,60 @@ pub struct Node {
     pub ports: Vec<Port>,
 }
 
+/// A directly imported topology drawn as a single collapsed node
+/// ([`TopologyView::Collapsed`] only).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyNode {
+    /// Stable identifier: the qualified topology name.
+    pub id: String,
+    /// The unqualified topology name.
+    pub name: String,
+    /// The fully qualified topology name.
+    pub qualified_name: String,
+    /// The topology's declared ports (`port x = inst.p`), expanded per index.
+    pub ports: Vec<Port>,
+}
+
 /// A connection between two ports in the diagram.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Edge {
     /// Stable identifier.
     pub id: String,
-    /// The source port id (an output port). Matches a [`Port::id`].
+    /// The source port id (an output port). Matches a [`Port::id`]; for an
+    /// implicit edge it may instead be a [`TopologyNode::id`].
     pub from_port: String,
-    /// The target port id (an input port). Matches a [`Port::id`].
+    /// The target port id (an input port). Matches a [`Port::id`]; for an
+    /// implicit edge it may instead be a [`TopologyNode::id`].
     pub to_port: String,
-    /// The connection graph (group) name this edge belongs to.
+    /// The connection graph (group) name this edge belongs to. Empty for the
+    /// edges joining a boundary port to the port it aliases.
     pub graph_name: String,
     /// Whether this connection is declared `unmatched`.
     pub unmatched: bool,
+    /// Whether an endpoint reaches into a collapsed topology without going
+    /// through one of its declared ports. Such an endpoint is the collapsed
+    /// node's id, and the edge is drawn onto the node's boundary rather than a
+    /// rendered port.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub implicit: bool,
+    /// Hover text naming the underlying component ports the edge stands for
+    /// (one connection per line); empty when the endpoints already say so.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub detail: String,
+    /// The number of connections the edge stands for: 1 for a single wire, more
+    /// for a bus (see [`Diagram::bundle_edges`]).
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub count: u32,
+}
+
+fn one() -> u32 {
+    1
+}
+
+fn is_one(n: &u32) -> bool {
+    *n == 1
 }
 
 /// A complete diagram in intermediate form.
@@ -165,12 +222,26 @@ pub struct Diagram {
     pub name: String,
     pub nodes: Vec<Node>,
     pub edges: Vec<Edge>,
+    /// Collapsed imported topologies ([`TopologyView::Collapsed`] only).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub topology_nodes: Vec<TopologyNode>,
+    /// The diagrammed topology's own declared ports, drawn on the diagram
+    /// boundary ([`TopologyView::Collapsed`] only). Their ids are
+    /// `<topology>.<port name>.<index>`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub boundary_ports: Vec<Port>,
 }
 
 impl Port {
     /// Build the stable id for a port element under a node.
     pub fn make_id(node_id: &str, port_name: &str, index: i128) -> String {
         format!("{node_id}.{port_name}.{index}")
+    }
+
+    /// Recover the node id from a port id built by [`Port::make_id`], i.e.
+    /// strip the final two dot-separated segments.
+    pub fn node_id(port_id: &str) -> &str {
+        port_id.rsplitn(3, '.').nth(2).unwrap_or(port_id)
     }
 }
 
@@ -179,7 +250,9 @@ impl Diagram {
     ///
     /// This is the IR-level equivalent of the legacy "hide unused ports" toggle.
     /// It is a no-op for [`DiagramKind::Component`] diagrams, which have no edges
-    /// and are meant to show a component's full port surface.
+    /// and are meant to show a component's full port surface. The declared
+    /// ports of collapsed topology nodes are always kept: they are the
+    /// interface the collapsed view exists to show.
     pub fn prune_unused_ports(&mut self) {
         if self.kind == DiagramKind::Component {
             return;
@@ -192,6 +265,92 @@ impl Diagram {
         for node in &mut self.nodes {
             node.ports.retain(|p| used.contains(p.id.as_str()));
         }
+    }
+
+    /// Bundle parallel wires into buses: edges joining the same two elements
+    /// (node, topology node, or boundary port) in the same direction become one
+    /// edge between the elements, with `count` wires listed in `detail` and
+    /// `implicit` only if every wire was. A lone wire keeps its ports.
+    pub fn bundle_edges(&mut self) {
+        let elements: rustc_hash::FxHashSet<&str> = self
+            .nodes
+            .iter()
+            .map(|n| n.id.as_str())
+            .chain(self.topology_nodes.iter().map(|n| n.id.as_str()))
+            .chain(self.boundary_ports.iter().map(|p| p.id.as_str()))
+            .collect();
+        fn element_of<'e>(elements: &rustc_hash::FxHashSet<&str>, end: &'e str) -> &'e str {
+            if elements.contains(end) {
+                end
+            } else {
+                Port::node_id(end)
+            }
+        }
+
+        // `node.port[index]` for each rendered port, to name a bus's wires.
+        let port_names: rustc_hash::FxHashMap<&str, String> = self
+            .nodes
+            .iter()
+            .map(|n| (n.id.as_str(), &n.ports))
+            .chain(
+                self.topology_nodes
+                    .iter()
+                    .map(|n| (n.id.as_str(), &n.ports)),
+            )
+            .flat_map(|(node, ports)| {
+                ports
+                    .iter()
+                    .map(move |p| (p.id.as_str(), format!("{node}.{}", p.label)))
+            })
+            .chain(
+                self.boundary_ports
+                    .iter()
+                    .map(|p| (p.id.as_str(), format!("{}.{}", self.name, p.label))),
+            )
+            .collect();
+        let wire = |e: &Edge| -> String {
+            if e.detail.is_empty() {
+                let name = |end: &str| port_names.get(end).cloned().unwrap_or(end.to_string());
+                format!("{} -> {}", name(&e.from_port), name(&e.to_port))
+            } else {
+                e.detail.clone()
+            }
+        };
+
+        let mut bundled: Vec<Edge> = Vec::new();
+        let mut by_elements: rustc_hash::FxHashMap<(String, String), usize> =
+            rustc_hash::FxHashMap::default();
+        let mut buses: rustc_hash::FxHashSet<usize> = rustc_hash::FxHashSet::default();
+        for edge in std::mem::take(&mut self.edges) {
+            let key = (
+                element_of(&elements, &edge.from_port).to_string(),
+                element_of(&elements, &edge.to_port).to_string(),
+            );
+            let Some(&i) = by_elements.get(&key) else {
+                by_elements.insert(key, bundled.len());
+                bundled.push(edge);
+                continue;
+            };
+            if buses.insert(i) {
+                let first = wire(&bundled[i]);
+                let bus = &mut bundled[i];
+                bus.id = format!("bus.{}.{}", key.0, key.1);
+                bus.from_port = key.0;
+                bus.to_port = key.1;
+                bus.detail = first;
+            }
+            let line = wire(&edge);
+            let bus = &mut bundled[i];
+            bus.detail.push('\n');
+            bus.detail.push_str(&line);
+            bus.count += edge.count;
+            bus.unmatched &= edge.unmatched;
+            bus.implicit &= edge.implicit;
+            if bus.graph_name != edge.graph_name {
+                bus.graph_name.clear();
+            }
+        }
+        self.edges = bundled;
     }
 }
 

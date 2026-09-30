@@ -108,6 +108,16 @@ export function registerDiagramSupport(
                 !webviewPanelManager.diagramConfig.hideUnusedPorts;
             void webviewPanelManager.updateDiagram();
         }),
+        vscode.commands.registerCommand("fpp.diagram.toggle-collapsed-subtopologies", () => {
+            webviewPanelManager.diagramConfig.collapseSubtopologies =
+                !webviewPanelManager.diagramConfig.collapseSubtopologies;
+            void webviewPanelManager.updateDiagram();
+        }),
+        vscode.commands.registerCommand("fpp.diagram.toggle-bus-wires", () => {
+            webviewPanelManager.diagramConfig.bundleEdges =
+                !webviewPanelManager.diagramConfig.bundleEdges;
+            void webviewPanelManager.updateDiagram();
+        }),
         vscode.commands.registerCommand("fpp.stateMachine.fit", () => mermaidPanel.fit()),
         vscode.commands.registerCommand("fpp.stateMachine.export", () => mermaidPanel.export()),
         vscode.commands.registerCommand("fpp.stateMachine.view-source", () => mermaidPanel.viewSource()),

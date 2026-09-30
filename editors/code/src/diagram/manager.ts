@@ -15,7 +15,7 @@
  * rendering) is unchanged.
  */
 import { createWebviewPanel, SprottyDiagramIdentifier, WebviewEndpoint, WebviewPanelManager, WebviewPanelManagerOptions } from "sprotty-vscode";
-import { RequestModelAction, ComputedBoundsAction, UpdateModelAction, FitToScreenAction, SGraph, RequestBoundsAction, applyBounds, SelectAllAction } from 'sprotty-protocol';
+import { RequestModelAction, ComputedBoundsAction, UpdateModelAction, FitToScreenAction, SGraph, RequestBoundsAction, applyBounds, SelectAllAction, OpenAction } from 'sprotty-protocol';
 import * as vscode from "vscode";
 import { LanguageClient } from "vscode-languageclient/node";
 import { ElkLayoutEngine } from "sprotty-elk/lib/elk-layout";
@@ -23,6 +23,7 @@ import ELK from 'elkjs/lib/elk-api.js';
 import { FppLayoutEngine } from "./layout";
 import { FppDiagramConfig, DiagramType } from "./layout-config";
 import * as lsp_ext from "../lsp_ext";
+import { TopologySNode } from "../../common/models";
 
 /** A provider of the current language client, since the client is recreated on restart. */
 export type ClientProvider = () => LanguageClient | undefined;
@@ -76,6 +77,8 @@ export class FppWebviewPanelManager extends WebviewPanelManager {
                 kind: kind as unknown as lsp_ext.DiagramKind,
                 name: this.diagramConfig.fullyQualifiedName,
                 hideUnusedPorts: this.diagramConfig.hideUnusedPorts,
+                topologyView: this.diagramConfig.collapseSubtopologies ? "collapsed" : "flattened",
+                bundleEdges: this.diagramConfig.bundleEdges,
             });
             return model as SGraph;
         } catch (e) {
@@ -91,6 +94,7 @@ export class FppWebviewPanelManager extends WebviewPanelManager {
         const activeWebview = super.createEndpoint(identifier);
         this.addRequestModelHandler(activeWebview);
         this.addComputedBoundsHandler(activeWebview);
+        this.addOpenHandler(activeWebview);
         return activeWebview;
     }
 
@@ -153,6 +157,18 @@ export class FppWebviewPanelManager extends WebviewPanelManager {
             }
         };
         endpoint.addActionHandler(ComputedBoundsAction.KIND, handler);
+    }
+
+    /** Double-clicking a collapsed topology node (`OpenAction`) shows that topology's diagram in the same panel. */
+    protected addOpenHandler(endpoint: WebviewEndpoint) {
+        const handler = async (action: OpenAction) => {
+            const element = this.sGraph?.children.find(c => c.id === action.elementId);
+            if (element?.type !== 'node:topology') {
+                return;
+            }
+            await this.displayDiagram(DiagramType.topology, (element as TopologySNode).qualifiedName);
+        };
+        endpoint.addActionHandler(OpenAction.KIND, handler);
     }
 
     /**************************************************************************/
