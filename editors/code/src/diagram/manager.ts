@@ -159,11 +159,7 @@ export class FppWebviewPanelManager extends WebviewPanelManager {
         endpoint.addActionHandler(ComputedBoundsAction.KIND, handler);
     }
 
-    /**
-     * The webview sends an `OpenAction` when the user double-clicks an element
-     * that can be opened. A collapsed topology node opens the diagram of the
-     * topology it stands for, replacing the current one in the same panel.
-     */
+    /** Double-clicking a collapsed topology node (`OpenAction`) shows that topology's diagram in the same panel. */
     protected addOpenHandler(endpoint: WebviewEndpoint) {
         const handler = async (action: OpenAction) => {
             const element = this.sGraph?.children.find(c => c.id === action.elementId);

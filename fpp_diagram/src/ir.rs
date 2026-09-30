@@ -267,14 +267,10 @@ impl Diagram {
         }
     }
 
-    /// Bundle parallel wires into buses.
-    ///
-    /// Edges joining the same two elements in the same direction — an element
-    /// being a component node, a collapsed topology node, or a boundary port —
-    /// become one edge between the elements themselves. Its `count` is the
-    /// number of wires it stands for, its `detail` lists them one per line, and
-    /// it is `implicit` only if every wire was. An edge alone between its two
-    /// elements is left untouched, still ending on its ports.
+    /// Bundle parallel wires into buses: edges joining the same two elements
+    /// (node, topology node, or boundary port) in the same direction become one
+    /// edge between the elements, with `count` wires listed in `detail` and
+    /// `implicit` only if every wire was. A lone wire keeps its ports.
     pub fn bundle_edges(&mut self) {
         let elements: rustc_hash::FxHashSet<&str> = self
             .nodes

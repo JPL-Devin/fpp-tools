@@ -150,11 +150,7 @@ export class ArrowEdgeView extends PolylineEdgeView {
     }
 }
 
-/**
- * The slash of bus notation: a short stroke across the wire at its midpoint,
- * leaning 60° off the wire's direction there. The wire count is a label placed
- * by the edge layout beside the same point.
- */
+/** The bus slash: a short stroke across the wire at its midpoint, 60° off the wire's direction. */
 function renderBusSlash(segments: Point[]): VNode | null {
     const total = polylineLength(segments);
     if (total === 0) {
