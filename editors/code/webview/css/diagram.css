@@ -107,6 +107,24 @@ tspan {
     opacity: 0.85;
 }
 
+/* A bus: several parallel wires drawn as one fat wire with a slash and a count. */
+.sprotty-edge path.edge-bus {
+    stroke-width: 3px;
+}
+
+.sprotty-edge path.edge-bus.edge-implicit {
+    stroke-dasharray: 8 5;
+}
+
+.sprotty-edge .edge-bus-slash {
+    stroke-width: 1.5px;
+}
+
+/* A collapsed topology opens on double-click. */
+.topology-node {
+    cursor: pointer;
+}
+
 .port-sync {
     /* Red expresses the notion of "caution", because the component is synchronous. */
     fill: #fe92a8;

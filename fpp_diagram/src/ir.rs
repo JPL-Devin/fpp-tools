@@ -199,6 +199,18 @@ pub struct Edge {
     /// (one connection per line); empty when the endpoints already say so.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub detail: String,
+    /// The number of connections the edge stands for: 1 for a single wire, more
+    /// for a bus (see [`Diagram::bundle_edges`]).
+    #[serde(default = "one", skip_serializing_if = "is_one")]
+    pub count: u32,
+}
+
+fn one() -> u32 {
+    1
+}
+
+fn is_one(n: &u32) -> bool {
+    *n == 1
 }
 
 /// A complete diagram in intermediate form.
@@ -225,6 +237,12 @@ impl Port {
     pub fn make_id(node_id: &str, port_name: &str, index: i128) -> String {
         format!("{node_id}.{port_name}.{index}")
     }
+
+    /// Recover the node id from a port id built by [`Port::make_id`], i.e.
+    /// strip the final two dot-separated segments.
+    pub fn node_id(port_id: &str) -> &str {
+        port_id.rsplitn(3, '.').nth(2).unwrap_or(port_id)
+    }
 }
 
 impl Diagram {
@@ -247,6 +265,96 @@ impl Diagram {
         for node in &mut self.nodes {
             node.ports.retain(|p| used.contains(p.id.as_str()));
         }
+    }
+
+    /// Bundle parallel wires into buses.
+    ///
+    /// Edges joining the same two elements in the same direction — an element
+    /// being a component node, a collapsed topology node, or a boundary port —
+    /// become one edge between the elements themselves. Its `count` is the
+    /// number of wires it stands for, its `detail` lists them one per line, and
+    /// it is `implicit` only if every wire was. An edge alone between its two
+    /// elements is left untouched, still ending on its ports.
+    pub fn bundle_edges(&mut self) {
+        let elements: rustc_hash::FxHashSet<&str> = self
+            .nodes
+            .iter()
+            .map(|n| n.id.as_str())
+            .chain(self.topology_nodes.iter().map(|n| n.id.as_str()))
+            .chain(self.boundary_ports.iter().map(|p| p.id.as_str()))
+            .collect();
+        fn element_of<'e>(elements: &rustc_hash::FxHashSet<&str>, end: &'e str) -> &'e str {
+            if elements.contains(end) {
+                end
+            } else {
+                Port::node_id(end)
+            }
+        }
+
+        // `node.port[index]` for each rendered port, to name a bus's wires.
+        let port_names: rustc_hash::FxHashMap<&str, String> = self
+            .nodes
+            .iter()
+            .map(|n| (n.id.as_str(), &n.ports))
+            .chain(
+                self.topology_nodes
+                    .iter()
+                    .map(|n| (n.id.as_str(), &n.ports)),
+            )
+            .flat_map(|(node, ports)| {
+                ports
+                    .iter()
+                    .map(move |p| (p.id.as_str(), format!("{node}.{}", p.label)))
+            })
+            .chain(
+                self.boundary_ports
+                    .iter()
+                    .map(|p| (p.id.as_str(), format!("{}.{}", self.name, p.label))),
+            )
+            .collect();
+        let wire = |e: &Edge| -> String {
+            if e.detail.is_empty() {
+                let name = |end: &str| port_names.get(end).cloned().unwrap_or(end.to_string());
+                format!("{} -> {}", name(&e.from_port), name(&e.to_port))
+            } else {
+                e.detail.clone()
+            }
+        };
+
+        let mut bundled: Vec<Edge> = Vec::new();
+        let mut by_elements: rustc_hash::FxHashMap<(String, String), usize> =
+            rustc_hash::FxHashMap::default();
+        let mut buses: rustc_hash::FxHashSet<usize> = rustc_hash::FxHashSet::default();
+        for edge in std::mem::take(&mut self.edges) {
+            let key = (
+                element_of(&elements, &edge.from_port).to_string(),
+                element_of(&elements, &edge.to_port).to_string(),
+            );
+            let Some(&i) = by_elements.get(&key) else {
+                by_elements.insert(key, bundled.len());
+                bundled.push(edge);
+                continue;
+            };
+            if buses.insert(i) {
+                let first = wire(&bundled[i]);
+                let bus = &mut bundled[i];
+                bus.id = format!("bus.{}.{}", key.0, key.1);
+                bus.from_port = key.0;
+                bus.to_port = key.1;
+                bus.detail = first;
+            }
+            let line = wire(&edge);
+            let bus = &mut bundled[i];
+            bus.detail.push('\n');
+            bus.detail.push_str(&line);
+            bus.count += edge.count;
+            bus.unmatched &= edge.unmatched;
+            bus.implicit &= edge.implicit;
+            if bus.graph_name != edge.graph_name {
+                bus.graph_name.clear();
+            }
+        }
+        self.edges = bundled;
     }
 }
 

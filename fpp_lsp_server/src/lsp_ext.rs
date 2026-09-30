@@ -99,6 +99,11 @@ pub struct DiagramParams {
     /// [`TopologyView::Flattened`] when the client omits it.
     #[serde(default)]
     pub topology_view: TopologyView,
+    /// When true, parallel wires between the same two elements are bundled
+    /// into one bus edge carrying a wire count. Defaults to false when the
+    /// client omits it.
+    #[serde(default)]
+    pub bundle_edges: bool,
 }
 
 /// Mirrors [`fpp_diagram::TopologyView`] on the wire.

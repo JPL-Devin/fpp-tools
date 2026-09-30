@@ -9,7 +9,7 @@ use std::io::Read;
 use std::process::exit;
 
 use clap::{Parser, ValueEnum};
-use fpp_diagram::{DiagramKind, TopologyView, TransitionActionMode};
+use fpp_diagram::{DiagramKind, SmodelOptions, TopologyView, TransitionActionMode};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum ModeArg {
@@ -109,6 +109,11 @@ struct Args {
     #[arg(long, value_enum, default_value_t = ViewArg::Flattened)]
     view: ViewArg,
 
+    /// Bundle parallel wires between the same two elements into one bus edge
+    /// carrying a wire count (topology and connection-group diagrams only).
+    #[arg(long)]
+    bundle_edges: bool,
+
     /// The FPP source file to read. Reads from stdin when omitted.
     file: Option<String>,
 }
@@ -166,35 +171,25 @@ fn main() {
 /// Lower the requested element to its output string.
 fn lower(a: &fpp_analysis::Analysis, args: &Args) -> Result<String, fpp_diagram::LowerError> {
     let kind: DiagramKind = args.kind.into();
-    let mode: TransitionActionMode = args.mode.into();
-    let view: TopologyView = args.view.into();
+    let options = SmodelOptions {
+        hide_unused_ports: args.hide_unused_ports,
+        transition_action_mode: args.mode.into(),
+        topology_view: args.view.into(),
+        bundle_edges: args.bundle_edges,
+    };
 
     match args.format {
         FormatArg::Mermaid if kind == DiagramKind::StateMachine => {
-            fpp_diagram::lower_state_machine_to_mermaid(a, &args.name, mode)
-        }
-        FormatArg::Mermaid => {
-            // Mermaid is only implemented for state machines; other kinds fall
-            // back to sprotty JSON.
-            let json = fpp_diagram::lower_to_smodel_view(
+            fpp_diagram::lower_state_machine_to_mermaid(
                 a,
-                kind,
                 &args.name,
-                args.hide_unused_ports,
-                mode,
-                view,
-            )?;
-            Ok(json.to_string())
+                options.transition_action_mode,
+            )
         }
-        FormatArg::Sprotty => {
-            let json = fpp_diagram::lower_to_smodel_view(
-                a,
-                kind,
-                &args.name,
-                args.hide_unused_ports,
-                mode,
-                view,
-            )?;
+        // Mermaid is only implemented for state machines; other kinds fall
+        // back to sprotty JSON.
+        FormatArg::Mermaid | FormatArg::Sprotty => {
+            let json = fpp_diagram::lower_to_smodel_with(a, kind, &args.name, options)?;
             Ok(json.to_string())
         }
     }

@@ -80,12 +80,28 @@ pub fn lower_state_machine_to_mermaid(
     Ok(mermaid::state_machine_to_mermaid(&diagram, mode))
 }
 
+/// Options for lowering an element to a sprotty model; see
+/// [`lower_to_smodel_with`]. The default is the plain flattened view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct SmodelOptions {
+    /// Prune ports not referenced by any connection (a no-op for component and
+    /// state machine diagrams). See [`Diagram::prune_unused_ports`].
+    pub hide_unused_ports: bool,
+    /// How state machine transition actions are presented.
+    pub transition_action_mode: TransitionActionMode,
+    /// How topology and connection-group diagrams treat imported topologies.
+    pub topology_view: TopologyView,
+    /// Bundle parallel wires between the same two elements into one bus edge
+    /// carrying a wire count. See [`Diagram::bundle_edges`].
+    pub bundle_edges: bool,
+}
+
 /// Lower an element directly to a sprotty `SModel` JSON value.
 ///
 /// When `hide_unused_ports` is set, ports not referenced by any connection are
 /// pruned (a no-op for component and state machine diagrams). See
 /// [`Diagram::prune_unused_ports`]. Topologies use the flattened view; see
-/// [`lower_to_smodel_view`].
+/// [`lower_to_smodel_with`] for the other options.
 pub fn lower_to_smodel(
     a: &Analysis,
     kind: DiagramKind,
@@ -93,32 +109,34 @@ pub fn lower_to_smodel(
     hide_unused_ports: bool,
     mode: TransitionActionMode,
 ) -> Result<serde_json::Value, LowerError> {
-    lower_to_smodel_view(
+    lower_to_smodel_with(
         a,
         kind,
         name,
-        hide_unused_ports,
-        mode,
-        TopologyView::Flattened,
+        SmodelOptions {
+            hide_unused_ports,
+            transition_action_mode: mode,
+            ..SmodelOptions::default()
+        },
     )
 }
 
-/// Like [`lower_to_smodel`], with `view` selecting how topology and
-/// connection-group diagrams treat imported topologies; see [`TopologyView`].
-pub fn lower_to_smodel_view(
+/// Like [`lower_to_smodel`], with every option of [`SmodelOptions`].
+pub fn lower_to_smodel_with(
     a: &Analysis,
     kind: DiagramKind,
     name: &str,
-    hide_unused_ports: bool,
-    mode: TransitionActionMode,
-    view: TopologyView,
+    options: SmodelOptions,
 ) -> Result<serde_json::Value, LowerError> {
     if kind == DiagramKind::StateMachine {
-        let diagram = lower_state_machine(a, name, mode)?;
+        let diagram = lower_state_machine(a, name, options.transition_action_mode)?;
         return Ok(sprotty::state_machine_to_smodel_json(&diagram));
     }
-    let mut diagram = lower_view(a, kind, name, view)?;
-    if hide_unused_ports {
+    let mut diagram = lower_view(a, kind, name, options.topology_view)?;
+    if options.bundle_edges {
+        diagram.bundle_edges();
+    }
+    if options.hide_unused_ports {
         diagram.prune_unused_ports();
     }
     Ok(sprotty::to_smodel_json(&diagram))

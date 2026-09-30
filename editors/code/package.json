@@ -96,6 +96,12 @@
                 "category": "FPP Diagram"
             },
             {
+                "command": "fpp.diagram.toggle-bus-wires",
+                "title": "FPP: Toggle Bus Wires",
+                "icon": "$(combine)",
+                "category": "FPP Diagram"
+            },
+            {
                 "command": "fpp.stateMachine.fit",
                 "title": "FPP: Fit State Machine Diagram",
                 "icon": "$(arrow-both)",
@@ -186,6 +192,11 @@
                 },
                 {
                     "command": "fpp.diagram.toggle-collapsed-subtopologies",
+                    "when": "activeWebviewPanelId == 'fppDiagrams'",
+                    "group": "navigation"
+                },
+                {
+                    "command": "fpp.diagram.toggle-bus-wires",
                     "when": "activeWebviewPanelId == 'fppDiagrams'",
                     "group": "navigation"
                 },

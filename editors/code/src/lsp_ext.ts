@@ -31,6 +31,11 @@ export type DiagramParams = {
      * ports. Defaults to `"flattened"` when omitted.
      */
     topologyView?: "flattened" | "collapsed",
+    /**
+     * When true, parallel wires between the same two elements are bundled into
+     * one bus edge carrying a wire count. Defaults to false when omitted.
+     */
+    bundleEdges?: boolean,
 };
 
 /**

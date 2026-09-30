@@ -150,7 +150,7 @@ pub fn lower_connection_group_view(
             let edges = topology_edges(a, topology, Some(group));
             let used_nodes: FxHashSet<&str> = edges
                 .iter()
-                .flat_map(|e| [node_id_of_port(&e.from_port), node_id_of_port(&e.to_port)])
+                .flat_map(|e| [Port::node_id(&e.from_port), Port::node_id(&e.to_port)])
                 .collect();
             let nodes = instance_nodes(a, topology)
                 .into_iter()
@@ -203,21 +203,6 @@ pub fn lower_connection_group_view(
         topology_nodes,
         boundary_ports: vec![],
     })
-}
-
-/// Recover the node id from a port id (`<node id>.<port>.<index>`), i.e. strip
-/// the final two dot-separated segments.
-fn node_id_of_port(port_id: &str) -> &str {
-    match (
-        port_id.rfind('.'),
-        port_id.get(..port_id.rfind('.').unwrap_or(0)),
-    ) {
-        (Some(_), Some(head)) => match head.rfind('.') {
-            Some(cut) => &head[..cut],
-            None => head,
-        },
-        _ => port_id,
-    }
 }
 
 // --- node construction ------------------------------------------------------
@@ -388,6 +373,7 @@ fn connection_edge(
         unmatched: connection.is_unmatched,
         implicit: false,
         detail: String::new(),
+        count: 1,
     })
 }
 
@@ -569,7 +555,7 @@ impl<'a> CollapsedScope<'a> {
         if self.imported.contains_key(end) {
             end
         } else {
-            node_id_of_port(end)
+            Port::node_id(end)
         }
     }
 
@@ -598,7 +584,7 @@ impl<'a> CollapsedScope<'a> {
             })
             .flatten()
             .map(|end| match end {
-                End::Port(id) => node_id_of_port(&id).to_string(),
+                End::Port(id) => Port::node_id(&id).to_string(),
                 End::Node(id) => id,
             })
             .collect()
@@ -629,6 +615,7 @@ impl<'a> CollapsedScope<'a> {
                             detail.push_str(&edge.detail);
                         }
                         edges[i].unmatched &= edge.unmatched;
+                        edges[i].count += edge.count;
                     }
                     None => {
                         by_ends.insert(key, edges.len());
@@ -685,6 +672,7 @@ impl<'a> CollapsedScope<'a> {
             unmatched: connection.is_unmatched,
             implicit,
             detail,
+            count: 1,
         })
     }
 
@@ -749,6 +737,7 @@ impl<'a> CollapsedScope<'a> {
                 unmatched: false,
                 implicit,
                 detail,
+                count: 1,
             });
             ports.push(port);
         }

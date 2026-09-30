@@ -270,13 +270,15 @@ fn collapsed_connection_group_keeps_participating_topology_nodes() {
 #[test]
 fn sprotty_model_carries_collapsed_elements() {
     with_analysis(MODEL, |a| {
-        let model = fpp_diagram::lower_to_smodel_view(
+        let model = fpp_diagram::lower_to_smodel_with(
             a,
             DiagramKind::Topology,
             "Top",
-            false,
-            fpp_diagram::TransitionActionMode::Uml,
-            TopologyView::Collapsed,
+            fpp_diagram::SmodelOptions {
+                hide_unused_ports: false,
+                topology_view: TopologyView::Collapsed,
+                ..fpp_diagram::SmodelOptions::default()
+            },
         )
         .unwrap();
         let children = model["children"].as_array().unwrap();
@@ -309,13 +311,15 @@ fn sprotty_model_carries_collapsed_elements() {
         assert!(explicit.get("implicit").is_none());
         assert!(explicit.get("detail").is_none());
 
-        let sub_model = fpp_diagram::lower_to_smodel_view(
+        let sub_model = fpp_diagram::lower_to_smodel_with(
             a,
             DiagramKind::Topology,
             "Sub.Subtopology",
-            false,
-            fpp_diagram::TransitionActionMode::Uml,
-            TopologyView::Collapsed,
+            fpp_diagram::SmodelOptions {
+                hide_unused_ports: false,
+                topology_view: TopologyView::Collapsed,
+                ..fpp_diagram::SmodelOptions::default()
+            },
         )
         .unwrap();
         let boundary: Vec<_> = sub_model["children"]
@@ -345,13 +349,15 @@ fn sprotty_flattened_model_is_unchanged_by_the_view_parameter() {
             fpp_diagram::TransitionActionMode::Uml,
         )
         .unwrap();
-        let flattened = fpp_diagram::lower_to_smodel_view(
+        let flattened = fpp_diagram::lower_to_smodel_with(
             a,
             DiagramKind::Topology,
             "Top",
-            true,
-            fpp_diagram::TransitionActionMode::Uml,
-            TopologyView::Flattened,
+            fpp_diagram::SmodelOptions {
+                hide_unused_ports: true,
+                topology_view: TopologyView::Flattened,
+                ..fpp_diagram::SmodelOptions::default()
+            },
         )
         .unwrap();
         assert_eq!(legacy, flattened);

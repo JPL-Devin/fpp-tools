@@ -22,6 +22,7 @@ export class FppDiagramConfig extends DefaultLayoutConfigurator {
     // Stateful diagram options
     public hideUnusedPorts = true;                      // By default, hide unused ports.
     public collapseSubtopologies = false;               // By default, flatten imported topologies into the diagram.
+    public bundleEdges = true;                          // By default, draw parallel wires as one counted bus.
     public currentDiagramType: DiagramType | undefined; // Current diagram type
     public fullyQualifiedName: string = "";             // Fully qualified name of the element currently displayed
 

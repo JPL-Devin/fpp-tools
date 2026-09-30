@@ -17,9 +17,15 @@ export interface BoundarySNode extends SNode {
     isOutput: boolean, // Outputs are pinned to the last ELK layer, inputs to the first.
 }
 
+/** A collapsed imported topology; activating it opens that topology's diagram. */
+export interface TopologySNode extends SNode {
+    qualifiedName: string
+}
+
 export interface FppSEdge extends SEdge {
     implicit?: boolean, // Ends on a collapsed topology's boundary rather than a rendered port.
     detail?: string,    // Hover text.
+    count?: number,     // Wires the edge stands for; more than one makes it a bus. Absent means 1.
 }
 
 export interface PortSNode extends SPort {

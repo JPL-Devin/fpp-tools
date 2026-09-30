@@ -4,7 +4,7 @@ import { injectable } from 'inversify';
 import { VNode } from 'snabbdom';
 import { IView, IViewArgs, PolylineEdgeView, RenderingContext, SEdgeImpl, SLabelImpl, SLabelView, SNodeImpl, SPortImpl } from 'sprotty';
 import { Point, Selectable } from 'sprotty-protocol';
-import { BoundarySNode, ComponentSNode, FppSEdge, PortSNode } from '../../common/models';
+import { BoundarySNode, ComponentSNode, FppSEdge, PortSNode, TopologySNode } from '../../common/models';
 
 @injectable()
 export class ComponentNodeView implements IView {
@@ -28,8 +28,9 @@ export class ComponentNodeView implements IView {
 /** A collapsed imported topology: a dashed box carrying its declared ports. */
 @injectable()
 export class TopologyNodeView implements IView {
-    render(node: Readonly<SNodeImpl & Selectable>, context: RenderingContext): VNode {
+    render(node: Readonly<SNodeImpl & TopologySNode & Selectable>, context: RenderingContext): VNode {
         return <g>
+            <title>{`Double-click to open ${node.qualifiedName}`}</title>
             <rect class-sprotty-node={true} class-topology-node={true}
                 class-selected={node.selected}
                 width={node.size.width}
@@ -122,6 +123,7 @@ export class ArrowEdgeView extends PolylineEdgeView {
             path += ` L ${p.x},${p.y}`;
         }
         const detail = edge.detail;
+        const bus = (edge.count ?? 1) > 1;
         return <g>
             {detail ? <title>{detail}</title> : null}
             <marker
@@ -139,11 +141,60 @@ export class ArrowEdgeView extends PolylineEdgeView {
             <path
                 d={path}
                 class-edge-implicit={edge.implicit === true}
+                class-edge-bus={bus}
                 marker-end="url(#arrow)"
             />
+            {bus ? renderBusSlash(segments) : null}
         </g>
             ;
     }
+}
+
+/**
+ * The slash of bus notation: a short stroke across the wire at its midpoint,
+ * leaning 60° off the wire's direction there. The wire count is a label placed
+ * by the edge layout beside the same point.
+ */
+function renderBusSlash(segments: Point[]): VNode | null {
+    const total = polylineLength(segments);
+    if (total === 0) {
+        return null;
+    }
+    let remaining = total / 2;
+    for (let i = 1; i < segments.length; i++) {
+        const a = segments[i - 1];
+        const b = segments[i];
+        const length = Math.hypot(b.x - a.x, b.y - a.y);
+        if (length < remaining && i < segments.length - 1) {
+            remaining -= length;
+            continue;
+        }
+        const t = length === 0 ? 0 : remaining / length;
+        const mid = { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
+        const dir = length === 0 ? { x: 1, y: 0 } : { x: (b.x - a.x) / length, y: (b.y - a.y) / length };
+        const angle = Math.PI / 3;
+        const slash = {
+            x: dir.x * Math.cos(angle) - dir.y * Math.sin(angle),
+            y: dir.x * Math.sin(angle) + dir.y * Math.cos(angle),
+        };
+        const half = 7;
+        return <line
+            class-edge-bus-slash={true}
+            x1={mid.x - slash.x * half}
+            y1={mid.y - slash.y * half}
+            x2={mid.x + slash.x * half}
+            y2={mid.y + slash.y * half}
+        />;
+    }
+    return null;
+}
+
+function polylineLength(segments: Point[]): number {
+    let total = 0;
+    for (let i = 1; i < segments.length; i++) {
+        total += Math.hypot(segments[i].x - segments[i - 1].x, segments[i].y - segments[i - 1].y);
+    }
+    return total;
 }
 
 // --- state machine views ----------------------------------------------------

@@ -127,13 +127,16 @@ pub fn handle_diagram(
         .map(serde_json::Value::String)
         .map_err(|e| anyhow::anyhow!("{e}"));
     }
-    fpp_diagram::lower_to_smodel_view(
+    fpp_diagram::lower_to_smodel_with(
         &state.analysis,
         params.kind.into(),
         &params.name,
-        params.hide_unused_ports,
-        params.transition_action_mode.into(),
-        params.topology_view.into(),
+        fpp_diagram::SmodelOptions {
+            hide_unused_ports: params.hide_unused_ports,
+            transition_action_mode: params.transition_action_mode.into(),
+            topology_view: params.topology_view.into(),
+            bundle_edges: params.bundle_edges,
+        },
     )
     .map_err(|e| anyhow::anyhow!("{e}"))
 }
