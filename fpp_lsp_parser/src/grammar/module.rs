@@ -4,10 +4,7 @@ pub(super) fn def_module(p: &mut Parser) {
     assert!(p.at(MODULE_KW));
     let m = p.start();
     p.bump(MODULE_KW);
-    if !name(p) {
-        m.abandon(p);
-        return;
-    }
+    name(p);
     if p.at(LEFT_CURLY) {
         member_list(
             p,
@@ -16,10 +13,10 @@ pub(super) fn def_module(p: &mut Parser) {
             module_member,
             SEMI,
             MODULE_MEMBER_LIST,
-            "expected module member",
+            "module member expected",
         )
     } else {
-        p.error("expected '{'")
+        p.error("{ expected")
     }
 
     m.complete(p, DEF_MODULE);
@@ -41,13 +38,16 @@ pub(super) fn module_member(p: &mut Parser) {
         INSTANCE_KW => def_component_instance(p),
         PASSIVE_KW | ACTIVE_KW | QUEUED_KW => component::def_component(p),
         INTERFACE_KW => def_interface(p),
+        MODULE_KW if p.nth_at(1, TEMPLATE_KW) => def_module_template(p),
         MODULE_KW => def_module(p),
         PORT_KW => def_port(p),
         STATE_KW => state_machine::def_state_machine(p),
         SYSTEM_KW => topology::def_system(p),
-        TOPOLOGY_KW | DEPLOYMENT_KW => topology::def_topology(p),
+        DEPLOYMENT_KW if p.nth_at(1, TOPOLOGY_KW) => topology::def_topology(p),
+        TOPOLOGY_KW => topology::def_topology(p),
         INCLUDE_KW => spec_include(p),
         LOCATE_KW => spec_loc(p),
+        EXPAND_KW => spec_template_expand(p),
 
         _ => {
             p.err_and_bump("module member expected");
@@ -55,12 +55,147 @@ pub(super) fn module_member(p: &mut Parser) {
     }
 }
 
+fn def_module_template(p: &mut Parser) {
+    assert!(p.at(MODULE_KW));
+    let m = p.start();
+    p.bump(MODULE_KW);
+    p.bump(TEMPLATE_KW);
+    name(p);
+
+    template_param_list(p);
+
+    if p.at(LEFT_CURLY) {
+        member_list(
+            p,
+            LEFT_CURLY,
+            RIGHT_CURLY,
+            module_member,
+            SEMI,
+            MODULE_MEMBER_LIST,
+            "module member expected",
+        )
+    } else {
+        p.error("{ expected")
+    }
+
+    m.complete(p, DEF_MODULE_TEMPLATE);
+}
+
+fn template_param_list(p: &mut Parser) {
+    if p.at(LEFT_PAREN) {
+        member_list(
+            p,
+            LEFT_PAREN,
+            RIGHT_PAREN,
+            template_param,
+            COMMA,
+            TEMPLATE_PARAM_LIST,
+            "template parameter expected",
+        );
+    }
+}
+
+fn template_param(p: &mut Parser) {
+    let m = p.start();
+    match p.current() {
+        CONSTANT_KW => {
+            p.bump(CONSTANT_KW);
+            name(p);
+            if p.eat(COLON) {
+                types::type_name(p);
+            } else {
+                p.error(": expected");
+            }
+        }
+        TYPE_KW => {
+            p.bump(TYPE_KW);
+            name(p);
+        }
+        INSTANCE_KW => {
+            p.bump(INSTANCE_KW);
+            name(p);
+            if p.eat(COLON) {
+                qual_ident(p);
+            } else {
+                p.error(": expected");
+            }
+        }
+        _ => {
+            m.abandon(p);
+            p.err_and_bump("template parameter expected");
+            return;
+        }
+    }
+
+    m.complete(p, TEMPLATE_PARAM);
+}
+
+fn spec_template_expand(p: &mut Parser) {
+    assert!(p.at(EXPAND_KW));
+    let m = p.start();
+    p.bump(EXPAND_KW);
+    qual_ident(p);
+    template_arg_list(p);
+    m.complete(p, SPEC_TEMPLATE_EXPAND);
+}
+
+fn template_arg_list(p: &mut Parser) {
+    if p.at(LEFT_PAREN) {
+        member_list(
+            p,
+            LEFT_PAREN,
+            RIGHT_PAREN,
+            template_arg,
+            COMMA,
+            TEMPLATE_ARG_LIST,
+            "template argument expected",
+        );
+    }
+}
+
+fn template_arg(p: &mut Parser) {
+    let m = p.start();
+    match p.current() {
+        CONSTANT_KW => {
+            p.bump(CONSTANT_KW);
+            expr::expr(p);
+        }
+        TYPE_KW => {
+            p.bump(TYPE_KW);
+            types::type_name(p);
+        }
+        INSTANCE_KW => {
+            p.bump(INSTANCE_KW);
+            qual_ident(p);
+        }
+        _ => {
+            m.abandon(p);
+            p.err_and_bump("template argument expected");
+            return;
+        }
+    }
+
+    m.complete(p, TEMPLATE_ARG);
+}
+
 fn spec_loc(p: &mut Parser) {
     assert!(p.at(LOCATE_KW));
     let m = p.start();
     p.bump(LOCATE_KW);
     match p.current() {
-        COMPONENT_KW | CONSTANT_KW | INSTANCE_KW | PORT_KW | TYPE_KW | INTERFACE_KW | SYSTEM_KW => {
+        // Only a constant or a type may be a dictionary definition
+        DICTIONARY_KW if matches!(p.nth(1), CONSTANT_KW | TYPE_KW) => {
+            p.bump(DICTIONARY_KW);
+            p.bump_any();
+        }
+        DICTIONARY_KW => {
+            p.bump(DICTIONARY_KW);
+            m.abandon(p);
+            p.err_recover("constant or type expected", MEMBER_RECOVERY_SET);
+            return;
+        }
+        COMPONENT_KW | CONSTANT_KW | INSTANCE_KW | PORT_KW | TEMPLATE_KW | TYPE_KW
+        | INTERFACE_KW | SYSTEM_KW => {
             p.bump_any();
         }
         STATE_KW => {
@@ -69,7 +204,10 @@ fn spec_loc(p: &mut Parser) {
         }
         _ => {
             m.abandon(p);
-            p.err_recover("expected locate specifier", MEMBER_RECOVERY_SET);
+            p.err_recover(
+                "dictionary specifier or location kind expected",
+                MEMBER_RECOVERY_SET,
+            );
             return;
         }
     }
@@ -142,7 +280,7 @@ fn def_component_instance(p: &mut Parser) {
             spec_init,
             SEMI,
             INIT_SPEC_LIST,
-            "expected initialization specifier",
+            "phase expected",
         )
     }
 
@@ -162,10 +300,7 @@ fn def_interface(p: &mut Parser) {
     assert!(p.at(INTERFACE_KW));
     let m = p.start();
     p.bump(INTERFACE_KW);
-    if !name(p) {
-        m.abandon(p);
-        return;
-    }
+    name(p);
 
     if p.at(LEFT_CURLY) {
         member_list(
@@ -175,18 +310,21 @@ fn def_interface(p: &mut Parser) {
             interface_member,
             SEMI,
             INTERFACE_MEMBER_LIST,
-            "expected interface member",
+            "component member expected",
         )
+    } else {
+        p.error("{ expected");
     }
 
     m.complete(p, DEF_INTERFACE);
 }
 
 fn interface_member(p: &mut Parser) {
-    if p.at(IMPORT_KW) {
-        spec_import_interface(p);
-    } else {
-        component::spec_port_instance(p);
+    match p.current() {
+        IMPORT_KW => spec_import_interface(p),
+        ASYNC_KW | GUARDED_KW | SYNC_KW | OUTPUT_KW | COMMAND_KW | EVENT_KW | PARAM_KW
+        | PRODUCT_KW | TELEMETRY_KW | TEXT_KW | TIME_KW => component::spec_port_instance(p),
+        _ => p.err_and_bump("component member expected"),
     }
 }
 
@@ -201,7 +339,7 @@ pub(super) fn def_constant(p: &mut Parser) {
     if p.eat(EQUALS) {
         expr::expr(p);
     } else {
-        p.error("expected `=`");
+        p.error("= expected");
     }
 
     m.complete(p, DEF_CONSTANT);

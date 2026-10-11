@@ -1,0 +1,8 @@
+ --> [ local path prefix ]/template-error-locate-file.fpp:3:1
+  |
+3 |
+  | ^ syntax error: unexpected token
+  |
+  = note: expected at
+  = note: got end of line
+

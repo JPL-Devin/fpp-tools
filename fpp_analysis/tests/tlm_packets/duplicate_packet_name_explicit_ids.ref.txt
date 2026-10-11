@@ -1,0 +1,10 @@
+ --> [ local path prefix ]/tlm_packets/duplicate_packet_name_explicit_ids.fpp:9:12
+  |
+9 |     packet A id 1 group 0 {
+  |            ^ duplicate packet name A
+  |
+ ::: [ local path prefix ]/tlm_packets/duplicate_packet_name_explicit_ids.fpp:6:12
+  |
+6 |     packet A id 5 group 0 {
+  |            - previous occurrence is here
+

@@ -1,0 +1,12 @@
+ --> [ local path prefix ]/enum/rep_type_string_size_scope.fpp:2:22
+  |
+2 | enum E : string size A { A = 1 }
+  |                      ^ symbol A is not defined
+  |
+  = note: looking for a constant here
+
+ --> [ local path prefix ]/enum/rep_type_string_size_scope.fpp:2:10
+  |
+2 | enum E : string size A { A = 1 }
+  |          ^^^^^^^^^^^^^ primitive integer type must be used
+

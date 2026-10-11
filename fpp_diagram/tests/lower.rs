@@ -1,6 +1,6 @@
 //! Integration tests: parse FPP source, run analysis, lower to IR + sprotty.
 
-use fpp_analysis::{Analysis, add_state_enums, check_semantics};
+use fpp_analysis::{Analysis, CheckSemantics};
 use fpp_core::SourceFile;
 use fpp_diagram::ir::{DiagramKind, Direction, PortKind};
 
@@ -12,9 +12,9 @@ fn with_analysis<R>(src: &str, f: impl FnOnce(&Analysis) -> R) -> R {
     fpp_core::run(&mut ctx, || {
         let source = SourceFile::new("test.fpp", src.to_string());
         let mut ast = fpp_parser::parse(source, |p| p.trans_unit(), None);
-        add_state_enums(&mut ast);
         let mut a = Analysis::new();
-        let _ = check_semantics(&mut a, vec![&ast]);
+        let _ =
+            CheckSemantics::tu_list(&mut a, fpp_fs::FsReader {}, std::slice::from_mut(&mut ast));
         f(&a)
     })
 }
@@ -156,6 +156,166 @@ fn connection_group_includes_only_participants() {
     });
 }
 
+/// A topology whose graph holds several connections, written in an order that
+/// sorts neither by port name nor by instance name, plus a connection of the
+/// same graph imported from a topology written after it.
+const MULTI_CONNECTION_MODEL: &str = r#"
+port P
+
+passive component Producer {
+    output port a: P
+    output port b: P
+    output port c: P
+}
+
+passive component Consumer {
+    sync input port x: P
+    sync input port y: P
+    sync input port z: P
+}
+
+instance prod: Producer base id 0x100
+instance cons: Consumer base id 0x200
+instance subProd: Producer base id 0x300
+instance subCons: Consumer base id 0x400
+
+topology Sys {
+    import Sub
+    instance prod
+    instance cons
+
+    connections C {
+        prod.b -> cons.z
+        prod.c -> cons.x
+        prod.a -> cons.y
+    }
+}
+
+topology Sub {
+    instance subProd
+    instance subCons
+
+    connections C {
+        subProd.a -> subCons.x
+    }
+}
+"#;
+
+#[test]
+fn edges_follow_connection_source_order() {
+    with_analysis(MULTI_CONNECTION_MODEL, |a| {
+        let diagram =
+            fpp_diagram::lower(a, DiagramKind::Topology, "Sys").expect("topology Sys should lower");
+        let edges: Vec<(&str, &str, &str)> = diagram
+            .edges
+            .iter()
+            .map(|e| (e.id.as_str(), e.from_port.as_str(), e.to_port.as_str()))
+            .collect();
+        assert_eq!(
+            edges,
+            vec![
+                ("C.connection.0", "prod.b.0", "cons.z.0"),
+                ("C.connection.1", "prod.c.0", "cons.x.0"),
+                ("C.connection.2", "prod.a.0", "cons.y.0"),
+                ("C.connection.3", "subProd.a.0", "subCons.x.0"),
+            ]
+        );
+
+        // A connection group diagram lists the same edges in the same order.
+        let group = fpp_diagram::lower(a, DiagramKind::ConnectionGroup, "Sys.C")
+            .expect("connection group Sys.C should lower");
+        let group_ids: Vec<&str> = group.edges.iter().map(|e| e.id.as_str()).collect();
+        assert_eq!(
+            group_ids,
+            vec![
+                "C.connection.0",
+                "C.connection.1",
+                "C.connection.2",
+                "C.connection.3"
+            ]
+        );
+    });
+}
+
+/// A topology with a connection pattern that imports a topology with another
+/// one. Each pattern lists its targets in an order that is not their name order.
+const PATTERN_MODEL: &str = r#"
+module Fw {
+    port Time
+}
+
+passive component TimeSource {
+    sync input port timeGetIn: Fw.Time
+}
+
+passive component User {
+    time get port timeGetOut
+}
+
+instance source: TimeSource base id 0x100
+instance a: User base id 0x200
+instance b: User base id 0x300
+instance c: User base id 0x400
+instance subSource: TimeSource base id 0x500
+instance x: User base id 0x600
+instance y: User base id 0x700
+instance z: User base id 0x800
+
+topology Sub {
+    instance subSource
+    instance x
+    instance y
+    instance z
+    time connections instance subSource { z, x, y }
+}
+
+topology Sys {
+    import Sub
+    instance source
+    instance a
+    instance b
+    instance c
+    time connections instance source { c, a, b }
+}
+"#;
+
+#[test]
+fn pattern_edges_follow_target_order() {
+    with_analysis(PATTERN_MODEL, |a| {
+        let edges = |name: &str| -> Vec<(String, String)> {
+            fpp_diagram::lower(a, DiagramKind::Topology, name)
+                .expect("topology should lower")
+                .edges
+                .iter()
+                .map(|e| (e.id.clone(), e.from_port.clone()))
+                .collect()
+        };
+        let expected = |ports: &[&str]| -> Vec<(String, String)> {
+            ports
+                .iter()
+                .enumerate()
+                .map(|(i, port)| (format!("Time.connection.{i}"), port.to_string()))
+                .collect()
+        };
+        assert_eq!(
+            edges("Sub"),
+            expected(&["z.timeGetOut.0", "x.timeGetOut.0", "y.timeGetOut.0"])
+        );
+        // The imported pattern, written first, then the local one
+        assert_eq!(
+            edges("Sys"),
+            expected(&[
+                "z.timeGetOut.0",
+                "x.timeGetOut.0",
+                "y.timeGetOut.0",
+                "c.timeGetOut.0",
+                "a.timeGetOut.0",
+                "b.timeGetOut.0",
+            ])
+        );
+    });
+}
+
 #[test]
 fn lowers_to_sprotty_graph() {
     with_analysis(MODEL, |a| {
@@ -250,5 +410,63 @@ fn missing_element_is_an_error() {
     with_analysis(MODEL, |a| {
         let err = fpp_diagram::lower(a, DiagramKind::Topology, "DoesNotExist").unwrap_err();
         assert!(matches!(err, fpp_diagram::LowerError::NotFound { .. }));
+    });
+}
+
+/// A topology defined by a module template, whose producer is a bound port
+/// interface instance template parameter. Both the instance node and the
+/// connection to it must come out under the *bound* instance's name, not the
+/// parameter's: a bound parameter is not a node of its own.
+const TEMPLATE_MODEL: &str = r#"
+port P
+
+passive component Producer {
+    output port pOut: P
+}
+
+passive component Consumer {
+    sync input port cIn: P
+}
+
+instance prod: Producer base id 0x100
+instance cons: Consumer base id 0x200
+
+interface I {
+    output port pOut: P
+}
+
+module template T(instance i: I) {
+    topology Sys {
+        instance i
+        instance cons
+
+        connections C {
+            i.pOut -> cons.cIn
+        }
+    }
+}
+
+expand T(instance prod)
+"#;
+
+#[test]
+fn lowers_topology_from_template_expansion() {
+    with_analysis(TEMPLATE_MODEL, |a| {
+        let diagram =
+            fpp_diagram::lower(a, DiagramKind::Topology, "Sys").expect("topology Sys should lower");
+
+        let mut node_ids: Vec<&str> = diagram.nodes.iter().map(|n| n.id.as_str()).collect();
+        node_ids.sort_unstable();
+        assert_eq!(node_ids, vec!["cons", "prod"]);
+
+        // The bound parameter's node carries the component it was given, with
+        // that component's full port set — not just the interface's ports.
+        let prod = diagram.nodes.iter().find(|n| n.id == "prod").unwrap();
+        assert_eq!(prod.class_name.as_deref(), Some("Producer"));
+
+        assert_eq!(diagram.edges.len(), 1, "edges: {:?}", diagram.edges);
+        let edge = &diagram.edges[0];
+        assert_eq!(edge.from_port, "prod.pOut.0");
+        assert_eq!(edge.to_port, "cons.cIn.0");
     });
 }

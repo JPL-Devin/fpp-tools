@@ -20,7 +20,7 @@ fpp_python_macros::fpp_ast_bindings! {
         InputPortKind { Async, Guarded, Sync },
         IntegerKind { U8, I8, U16, I16, U32, I32, U64, I64 },
         QueueFull { Assert, Block, Drop, Hook },
-        SpecLocKind { Component, Instance, Constant, Port, StateMachine, System, Type, Interface },
+        SpecLocKind { Component, Instance, Constant, Port, StateMachine, Template, System, Type, Interface },
         SpecialPortInstanceKind { CommandRecv, CommandReg, CommandResp, Event, ParamGet, ParamSet, ProductGet, ProductRecv, ProductRequest, ProductSend, Telemetry, TextEvent, TimeGet },
         TlmChannelLimitKind { Red, Orange, Yellow },
         TlmChannelUpdate { Always, OnChange },
@@ -75,7 +75,7 @@ fpp_python_macros::fpp_ast_bindings! {
     node DefComponentInstance {
         name: str(data),
         component: QualIdent,
-        base_id: Expr?,
+        base_id: Expr,
         impl_type: str(data)?,
         file: str(data)?,
         queue_size: Expr?,
@@ -116,6 +116,12 @@ fpp_python_macros::fpp_ast_bindings! {
 
     node DefModule {
         name: str(data),
+        members: [ModuleMember],
+    }
+
+    node DefModuleTemplate {
+        name: str(data),
+        params: [TemplateParam],
         members: [ModuleMember],
     }
 
@@ -327,6 +333,12 @@ fpp_python_macros::fpp_ast_bindings! {
         transition_or_do: TransitionOrDo,
     }
 
+    node SpecTemplateExpand {
+        template: QualIdent,
+        args: [TemplateArg],
+        members: [ModuleMember]?,
+    }
+
     node SpecTlmChannel {
         name: str(data),
         type_name: TypeName,
@@ -367,6 +379,24 @@ fpp_python_macros::fpp_ast_bindings! {
         format: str(data)?,
     }
 
+    node TemplateArg {
+        kind: TemplateArgKind,
+    }
+
+    node TemplateParamConstant {
+        name: str(data),
+        type_name: TypeName,
+    }
+
+    node TemplateParamInterface {
+        name: str(data),
+        interface: QualIdent,
+    }
+
+    node TemplateParamType {
+        name: str(data),
+    }
+
     node TlmChannelIdentifier {
         component_instance: QualIdent,
         channel_name: Ident,
@@ -384,6 +414,11 @@ fpp_python_macros::fpp_ast_bindings! {
 
     node TypeName {
         kind: TypeNameKind,
+    }
+
+    node Unqualified {
+        name: Ident,
+        is_absolute: bool,
     }
 
     union ComponentMember {
@@ -423,6 +458,7 @@ fpp_python_macros::fpp_ast_bindings! {
         DefEnum(DefEnum),
         DefInterface(DefInterface),
         DefModule(DefModule),
+        DefModuleTemplate(DefModuleTemplate),
         DefPort(DefPort),
         DefStateMachine(DefStateMachine),
         DefStruct(DefStruct),
@@ -430,10 +466,11 @@ fpp_python_macros::fpp_ast_bindings! {
         DefTopology(DefTopology),
         SpecInclude(SpecInclude),
         SpecLoc(SpecLoc),
+        SpecTemplateExpand(SpecTemplateExpand),
     }
 
     union QualIdent {
-        Unqualified(Ident),
+        Unqualified(Unqualified),
         Qualified(Qualified),
     }
 
@@ -468,6 +505,12 @@ fpp_python_macros::fpp_ast_bindings! {
         SpecStateTransition(SpecStateTransition),
     }
 
+    union TemplateParam {
+        Constant(TemplateParamConstant),
+        Type(TemplateParamType),
+        Interface(TemplateParamInterface),
+    }
+
     union TlmPacketMember {
         SpecInclude(SpecInclude),
         TlmChannelIdentifier(TlmChannelIdentifier),
@@ -492,7 +535,7 @@ fpp_python_macros::fpp_ast_bindings! {
         ArraySubscript { e1: Expr, e2: Expr },
         Binop { left: Expr, op: Binop, right: Expr },
         Dot { e: Expr, id: Ident },
-        Ident(String),
+        Ident { value: String, is_absolute: bool },
         LiteralBool(bool),
         LiteralInt(String),
         LiteralFloat(String),
@@ -501,6 +544,12 @@ fpp_python_macros::fpp_ast_bindings! {
         SizeOf(TypeName),
         Struct([StructExprMember]),
         Unop { op: Unop, e: Expr },
+    }
+
+    kind TemplateArgKind {
+        Constant(Expr),
+        Type(TypeName),
+        Interface(QualIdent),
     }
 
     kind TransitionOrDo {

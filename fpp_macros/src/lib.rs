@@ -1,6 +1,7 @@
 mod annotated;
 mod enum_map;
 mod node;
+mod replicate;
 mod util;
 mod visitable;
 
@@ -29,9 +30,9 @@ use synstructure::decl_derive;
 ///
 /// For structures:
 /// ```ignore
-/// use fpp_macros::ast_node;
+/// use fpp_macros::ast;
 ///
-/// #[ast_node]
+/// #[ast]
 /// pub struct TlmChannelIdentifier {
 ///    pub component_instance: QualIdent,
 ///    pub channel_name: Ident,
@@ -45,7 +46,7 @@ use synstructure::decl_derive;
 /// #[ast]
 /// pub enum InterfaceMember {
 ///     SpecPortInstance(SpecPortInstance),
-///     SpecImport(SpecImport),
+///     SpecInterfaceImport(SpecInterfaceImport),
 /// }
 /// ```
 #[proc_macro_attribute]
@@ -57,11 +58,8 @@ pub fn ast(_attrs: TokenStream, input: TokenStream) -> TokenStream {
         Item::Struct(item_struct) => ast_node_struct(item_struct),
         Item::Enum(item_enum) => ast_node_enum(item_enum),
         other => {
-            let err = syn::Error::new_spanned(
-                other,
-                "#[ast_node] #[derive(AstAnnotated)] only supports structs or enums",
-            )
-            .to_compile_error();
+            let err = syn::Error::new_spanned(other, "#[ast] only supports structs or enums")
+                .to_compile_error();
             err.into()
         }
     }
@@ -81,7 +79,7 @@ pub fn ast(_attrs: TokenStream, input: TokenStream) -> TokenStream {
 /// #[ast]
 /// #[derive(AstAnnotated)]
 /// pub struct SpecStateMachineInstance {
-///     pub name: Ident,
+///     pub name: Name,
 ///     pub state_machine: QualIdent,
 ///     pub priority: Option<Expr>,
 ///     pub queue_full: Option<QueueFull>,
@@ -90,13 +88,11 @@ pub fn ast(_attrs: TokenStream, input: TokenStream) -> TokenStream {
 ///
 /// For enums:
 /// ```ignore
-/// use fpp_macros::ast_node;
-///
 /// #[ast]
 /// #[derive(AstAnnotated)]
 /// pub enum InterfaceMember {
 ///     SpecPortInstance(SpecPortInstance),
-///     SpecImport(SpecImport),
+///     SpecInterfaceImport(SpecInterfaceImport),
 /// }
 /// ```
 #[proc_macro_derive(AstAnnotated)]
@@ -108,7 +104,7 @@ pub fn ast_annotated(input: TokenStream) -> TokenStream {
         Item::Struct(item_struct) => annotated_struct(&item_struct),
         Item::Enum(item_enum) => annotated_enum(&item_enum),
         other => {
-            let err = syn::Error::new_spanned(other, "#[ast_node] only supports structs or enums")
+            let err = syn::Error::new_spanned(other, "AstAnnotated only supports structs or enums")
                 .to_compile_error();
             err.into()
         }
@@ -117,7 +113,8 @@ pub fn ast_annotated(input: TokenStream) -> TokenStream {
 
 decl_derive!(
     [VisitorWalkable, attributes(visitable)] =>
-    /// Derives `Walkable + Visitable` for the annotated `struct` or `enum` (`union` is not supported).
+    /// Derives `Walkable`, `Visitable`, `MutWalkable` and `MutVisitable` for the annotated `struct`
+    /// or `enum` (`union` is not supported).
     ///
     /// For `Walkable`:
     /// Each field of the struct or enum variant will be visited in definition order, using the
@@ -127,19 +124,19 @@ decl_derive!(
     ///
     /// For `Visitable`:
     /// The visitor's callback for this node type will be called. The function will be called
-    /// `visit_<type_name_in_snake_case>. For example, for the type DefAliasType, the
+    /// `visit_<type_name_in_snake_case>`. For example, for the type DefAliasType, the
     /// [fpp_ast::Visitor::visit_def_alias_type] will be called.
     visitable::walkable_visit_derive
 );
 
 decl_derive!(
     [DirectWalkable, attributes(visitable)] =>
-    /// Derives `Walkable + Visitable` for the annotated `struct` or `enum` (`union` is not supported).
+    /// Derives `Walkable`, `Visitable`, `MutWalkable` and `MutVisitable` for the annotated `struct`
+    /// or `enum` (`union` is not supported).
     ///
     /// This macro differs from [VisitorWalkable] as it does not delegate to the `Visitor`. Instead, it
     /// directly walks the children. This effectively means that the behavior cannot be overridden
-    /// in the visitor and also avoid the need to have a signature in the Visitor to implement the
-    /// walking behavior.
+    /// in the visitor: no visitor hook is ever called for the type.
     ///
     /// Typically, this derivation should be used for the `*Member` or `*Kind` enums which just wrap
     /// different implementations of a type of node. Each of the variant nodes would be [VisitorWalkable]
@@ -158,8 +155,23 @@ decl_derive!(
 
 decl_derive!(
     [DirectRefWalkable, attributes(visitable)] =>
-    /// Same as [DirectWalkable] except it only generates
+    /// Same as [DirectWalkable] except it only generates `AstNode`, `Spanned` and by-value
+    /// `MoveWalkable` implementations, for the `Node` reference enum
     visitable::walkable_direct_ref_derive
+);
+
+decl_derive!(
+    [Replicate] =>
+    /// Derives `Replicate` for the annotated `struct` or `enum` (`union` is not supported).
+    ///
+    /// Every field is replicated in definition order, using the `Replicate`
+    /// implementation for its type. Unlike the walkable derives, no field is
+    /// skipped: a `#[visitable(ignore)]` field can still carry a node identity.
+    ///
+    /// The `node_id` field injected by `#[ast]` is replicated like any other, so
+    /// a type deriving `Replicate` gets a fresh identity for itself and for
+    /// every node beneath it.
+    replicate::replicate_derive
 );
 
 /// Count the number of variants in an enum and emit a `SIZE` constant in the impl
@@ -171,8 +183,8 @@ pub fn enum_count(input: TokenStream) -> TokenStream {
     (match item {
         Item::Enum(input) => enum_map(input),
         other => {
-            let err = syn::Error::new_spanned(other, "#[ast_node] only supports structs or enums")
-                .to_compile_error();
+            let err =
+                syn::Error::new_spanned(other, "EnumMap only supports enums").to_compile_error();
             return err.into();
         }
     })

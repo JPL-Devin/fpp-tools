@@ -16,7 +16,8 @@ name. It also covers the contracts the stub is easiest to get wrong
 about: a leaf enum's `str`-typed `.name`/`.value`, `str()` of a union base,
 `lookup(kind=…)` / `lookup_all`, a symbol's `int` `node_id` beside its node
 `definition`, `Topology.node`, `Diagnostic.display`, the writable `Diagnostic` raised as a
-`DiagnosticError`, and the `is_source` / `in_source` flags.
+`DiagnosticError`, the `is_source` / `in_source` flags, and a module template's
+`Optional` expanded body beside the `TemplateExpansion` that bound its arguments.
 """
 
 from __future__ import annotations
@@ -47,6 +48,7 @@ from fpp import (
     StateMachineSymbol,
     Symbol,
     SyntaxTree,
+    TemplateExpansion,
     Topology,
     TransUnit,
     Type,
@@ -57,12 +59,15 @@ from fpp.ast import (
     Ident,
     DefComponent,
     DefConstant,
+    DefModule,
+    DefModuleTemplate,
     DefPort,
     DefTopology,
     Expr,
     ExprKind,
     IntegerKind,
     SpecCommand,
+    SpecTemplateExpand,
 )
 
 SRC = """
@@ -95,6 +100,17 @@ module M {
     initial enter S1
     state S1 { on s enter S1 }
   }
+}
+"""
+
+# A module template and one expansion of it, kept out of `SRC` so the walks above
+# stay about what they were about.
+TEMPLATE_SRC = """
+module M {
+  module template Scaled(constant factor: U32) {
+    constant width = factor * 8
+  }
+  expand Scaled(constant 4)
 }
 """
 
@@ -414,6 +430,28 @@ def syntax_only(paths: list[str]) -> int:
     return total
 
 
+def template_expansion(source: str) -> int:
+    """A `SpecTemplateExpand`'s `members` is the expanded template body, and is
+    `Optional` because only `analyze` expands it; `Analysis.expansion_at` gives the
+    `TemplateExpansion` holding the argument bound to each parameter, as symbols."""
+    model: Model = analyze(source=source, uri="template.fpp")
+    analysis: Analysis = model.analysis
+    total = 0
+    for module in (n for unit in model.ast for n in unit.members):
+        if not isinstance(module, DefModule):
+            continue
+        for member in module.members:
+            if isinstance(member, DefModuleTemplate):
+                total += len(member.name) + len(member.params)
+            elif isinstance(member, SpecTemplateExpand):
+                expanded = member.members
+                total += 0 if expanded is None else len(expanded)
+                expansion: TemplateExpansion = analysis.expansion_at(member)
+                bound: list[Symbol.Variant] = expansion.params
+                total += sum(len(param.unqualified_name) for param in bound)
+    return total
+
+
 def built_diagnostic(node: AstNode) -> str:
     """A diagnostic built in Python renders like one the compiler emitted."""
     span: Span = node.span
@@ -431,9 +469,11 @@ def built_diagnostic(node: AstNode) -> str:
     level: DiagnosticLevel = diagnostic.level
     location: Optional[Loc] = diagnostic.location
     includes: list[Loc] = diagnostic.includes
+    expansions: list[Loc] = diagnostic.expansions
     source: Optional[str] = diagnostic.source
     children: list[DiagnosticMessage] = diagnostic.children
     kinds: list[DiagnosticMessageKind] = [child.kind for child in children]
+    child_expansions: list[Loc] = [loc for child in children for loc in child.expansions]
     return "".join(
         [
             level.value,
@@ -443,6 +483,7 @@ def built_diagnostic(node: AstNode) -> str:
             str(diagnostic),
             "" if location is None else location.display,
             "".join(loc.display for loc in includes),
+            "".join(loc.display for loc in expansions + child_expansions),
             source or "",
             "".join(kind.name for kind in kinds),
         ]
@@ -502,6 +543,7 @@ def main() -> int:
         total += len(diag.display) + len(str(diag)) + len(diag.children)
     total += len(built_diagnostic(units[0].members[0]))
     total += len(raised_diagnostic(units[0].members[0]))
+    total += template_expansion(TEMPLATE_SRC)
     print(name, total)
     return 0
 

@@ -1,9 +1,13 @@
 use crate::Analysis;
 use crate::errors::{SemanticError, SemanticResult};
-use crate::semantics::{Dictionary, TlmChannelEntry, TlmChannelIdentifier, TlmPacket, Topology};
+use crate::semantics::{
+    Dictionary, TlmChannelEntry, TlmChannelId, TlmChannelIdentifier, TlmPacket, TlmPacketId,
+    Topology,
+};
 use fpp_ast::{SpecTlmPacketSet, TlmPacketMember, TlmPacketSetMember};
 use fpp_core::{Span, Spanned};
-use rustc_hash::{FxHashMap as HashMap, FxHashSet as HashSet};
+use indexmap::IndexMap;
+use rustc_hash::{FxBuildHasher, FxHashMap as HashMap, FxHashSet as HashSet};
 use std::sync::Arc;
 
 /// An FPP telemetry packet set
@@ -12,22 +16,23 @@ pub struct TlmPacketSet {
     /// The AST node
     pub node: Arc<SpecTlmPacketSet>,
     /// The map from packet IDs to packets
-    pub packet_map: HashMap<i128, TlmPacket>,
+    pub packet_map: IndexMap<TlmPacketId, TlmPacket, FxBuildHasher>,
     /// The next default packet ID
-    pub default_packet_id: i128,
+    pub default_packet_id: TlmPacketId,
     /// The set of omitted channel IDs
-    pub omitted_id_set: HashSet<i128>,
+    pub omitted_id_set: HashSet<TlmChannelId>,
     /// The map from each omitted channel ID to a location where the channel is
     /// marked as omitted. If the channel appears more than once in the omitted
     /// list in the source model, the map contains the last location.
-    pub omitted_location_map: HashMap<i128, Span>,
+    pub omitted_location_map: HashMap<TlmChannelId, Span>,
 }
 
 impl TlmPacketSet {
+    /// Creates an empty packet set for a packet set specifier
     pub fn new(node: Arc<SpecTlmPacketSet>) -> TlmPacketSet {
         TlmPacketSet {
             node,
-            packet_map: HashMap::default(),
+            packet_map: IndexMap::default(),
             default_packet_id: 0,
             omitted_id_set: HashSet::default(),
             omitted_location_map: HashMap::default(),
@@ -45,7 +50,7 @@ impl TlmPacketSet {
     }
 
     /// Add a telemetry packet to the set
-    pub fn add_packet(&mut self, id_opt: Option<i128>, packet: TlmPacket) -> SemanticResult {
+    pub fn add_packet(&mut self, id_opt: Option<TlmPacketId>, packet: TlmPacket) -> SemanticResult {
         let next = Analysis::add_element_to_id_map(
             &mut self.packet_map,
             id_opt.unwrap_or(self.default_packet_id),
@@ -57,7 +62,7 @@ impl TlmPacketSet {
     }
 
     /// Gets the channels used in the packet set
-    pub fn get_used_id_set(&self) -> HashSet<i128> {
+    pub fn get_used_id_set(&self) -> HashSet<TlmChannelId> {
         self.packet_map
             .values()
             .flat_map(|p| p.member_id_list.iter().copied())
@@ -65,36 +70,18 @@ impl TlmPacketSet {
     }
 
     /// Gets the used ID location map for the packet set
-    pub fn get_used_id_location_map(&self) -> HashMap<i128, Span> {
+    pub fn get_used_id_location_map(&self) -> HashMap<TlmChannelId, Span> {
         self.packet_map
             .values()
             .flat_map(|p| p.member_location_map.iter().map(|(id, loc)| (*id, *loc)))
             .collect()
     }
 
-    /// Completes a telemetry packet set definition
-    pub fn complete(
-        mut self,
-        a: &Analysis,
-        d: &Dictionary,
-        t: &Topology,
-    ) -> SemanticResult<TlmPacketSet> {
-        Analysis::check_dictionary_names(
-            &self.packet_map,
-            "packet",
-            |p| p.get_name().to_string(),
-            TlmPacket::get_loc,
-        )?;
-        self.compute_omitted_channels(a, d, t)?;
-        self.check_channel_usage(d)?;
-        Ok(self)
-    }
-
     /// Gets the dictionary channels whose IDs are not in `covered_id_set`, in
-    /// channel ID order
+    /// dictionary order
     pub fn get_uncovered_channels<'d>(
         d: &'d Dictionary,
-        covered_id_set: &HashSet<i128>,
+        covered_id_set: &HashSet<TlmChannelId>,
     ) -> Vec<&'d TlmChannelEntry> {
         d.tlm_channel_entry_map
             .iter()
@@ -104,7 +91,7 @@ impl TlmPacketSet {
     }
 
     /// Gets the channels that the packet set specifier `node` neither uses nor
-    /// marks as omitted, in channel ID order.
+    /// marks as omitted, in dictionary order.
     ///
     /// Constructing a packet set discards it when a channel is left uncovered,
     /// so a tool that wants the uncovered channels after the fact (an editor
@@ -157,44 +144,69 @@ impl TlmPacketSet {
 
     /// Checks that each channel is either used or omitted, but not both.
     ///
-    /// Each check reports every offending channel in one diagnostic: a topology
-    /// that forgets a packet set member typically forgets many, and one error
-    /// per channel would bury the rest of the model's diagnostics.
+    /// The first channel in dictionary order that fails a check decides which
+    /// error is reported, and the error lists every channel that fails the
+    /// same check: a topology that forgets a packet set member typically
+    /// forgets many, and one error per channel would bury the rest of the
+    /// model's diagnostics.
     fn check_channel_usage(&self, d: &Dictionary) -> SemanticResult {
         let used_id_set = self.get_used_id_set();
-        let covered_id_set = used_id_set.union(&self.omitted_id_set).copied().collect();
-        let uncovered_channels = Self::get_uncovered_channels(d, &covered_id_set);
-        if !uncovered_channels.is_empty() {
+        let used_id_location_map = self.get_used_id_location_map();
+        let is_used_or_omitted =
+            |id: &TlmChannelId| used_id_set.contains(id) || self.omitted_id_set.contains(id);
+        let is_used_and_omitted =
+            |id: &TlmChannelId| used_id_set.contains(id) && self.omitted_id_set.contains(id);
+        let Some(first_id) = d
+            .tlm_channel_entry_map
+            .keys()
+            .find(|id| !is_used_or_omitted(id) || is_used_and_omitted(id))
+        else {
+            return Ok(());
+        };
+        if !is_used_or_omitted(first_id) {
+            let covered_id_set = used_id_set.union(&self.omitted_id_set).copied().collect();
             return Err(SemanticError::TlmPacketSetChannelsNotCovered {
                 loc: self.get_loc(),
                 name: self.get_name().to_string(),
-                channels: uncovered_channels
+                channels: Self::get_uncovered_channels(d, &covered_id_set)
                     .iter()
                     .map(|entry| entry.get_qualified_name())
                     .collect(),
             });
         }
+        Err(SemanticError::TlmPacketSetChannelsUsedAndOmitted {
+            loc: self.get_loc(),
+            name: self.get_name().to_string(),
+            channels: d
+                .tlm_channel_entry_map
+                .iter()
+                .filter(|(id, _)| is_used_and_omitted(id))
+                .map(|(id, entry)| {
+                    (
+                        entry.get_qualified_name(),
+                        used_id_location_map[id],
+                        self.omitted_location_map[id],
+                    )
+                })
+                .collect(),
+        })
+    }
 
-        let used_id_location_map = self.get_used_id_location_map();
-        let used_and_omitted_channels: Vec<_> = d
-            .tlm_channel_entry_map
-            .iter()
-            .filter(|(id, _)| used_id_set.contains(id) && self.omitted_id_set.contains(id))
-            .map(|(id, entry)| {
-                (
-                    entry.get_qualified_name(),
-                    used_id_location_map[id],
-                    self.omitted_location_map[id],
-                )
-            })
-            .collect();
-        if !used_and_omitted_channels.is_empty() {
-            return Err(SemanticError::TlmPacketSetChannelsUsedAndOmitted {
-                loc: self.get_loc(),
-                name: self.get_name().to_string(),
-                channels: used_and_omitted_channels,
-            });
-        }
-        Ok(())
+    /// Completes a telemetry packet set definition
+    pub fn complete(
+        mut self,
+        a: &Analysis,
+        d: &Dictionary,
+        t: &Topology,
+    ) -> SemanticResult<TlmPacketSet> {
+        Analysis::check_dictionary_names(
+            &self.packet_map,
+            "packet",
+            |p| p.get_name().to_string(),
+            TlmPacket::get_loc,
+        )?;
+        self.compute_omitted_channels(a, d, t)?;
+        self.check_channel_usage(d)?;
+        Ok(self)
     }
 }

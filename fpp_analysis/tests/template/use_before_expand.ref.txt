@@ -1,0 +1,7 @@
+ --> [ local path prefix ]/template/use_before_expand.fpp:9:38
+  |
+9 | array UsesConstant = [k] U32 default [1, 2, 3]
+  |                                      ^^^^^^^^^ cannot convert [3] Integer to array UsesConstant
+  |
+  = note: array sizes do not match 3 != 4
+

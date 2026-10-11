@@ -1,15 +1,17 @@
  --> [ local path prefix ]/constant/undef_3.fpp:2:16
   |
 2 | constant b = M.a
-  |                ^ cannot find constant `a` in scope
+  |                ^ symbol a is not defined
+  |
+  = note: looking for a constant here
 
  --> [ local path prefix ]/constant/undef_3.fpp:2:14
   |
 2 | constant b = M.a
-  |              ^ not a constant symbol
+  |              ^ invalid use of symbol M: not a constant symbol
   |
- ::: [ local path prefix ]/constant/undef_3.fpp:1:8
+ ::: [ local path prefix ]/constant/undef_3.fpp:1:1
   |
 1 | module M { }
-  |        - M defined here
+  | ------------ symbol is defined here
 

@@ -1,0 +1,7 @@
+ --> [ local path prefix ]/template/expand_absolute_global_template.fpp:7:16
+  |
+7 |   constant x = d
+  |                ^ symbol d is not defined
+  |
+  = note: looking for a constant here
+

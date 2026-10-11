@@ -1,3 +1,4 @@
+use fpp_ast::AstNode;
 use fpp_core::{Node, Span, Spanned};
 use std::sync::Arc;
 
@@ -5,22 +6,29 @@ use crate::Analysis;
 
 /// The interface for an FPP symbol
 pub trait SymbolInterface: Clone {
-    /// Gets the AST node ID of the symbol
-    fn node(&self) -> Node;
-    /// Gets the unqualified name of the symbol
-    fn name(&self) -> &fpp_ast::Name;
     /// Gets the location of the symbol
     fn get_loc(&self) -> Span {
         self.node().span()
     }
+    /// Gets the AST node ID of the symbol
+    fn node(&self) -> Node;
+    /// Gets the unqualified name of the symbol
+    fn name(&self) -> &fpp_ast::Name;
 }
 
+/// The definition of a module symbol: the id and the name of a module
+/// definition.
+///
+/// A module may be defined in several parts, which share one symbol, and the
+/// symbol stands for the module rather than for one part, so it does not hold
+/// the members of a definition.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct DefModuleStub {
     pub node_id: Node,
     pub name: fpp_ast::Name,
 }
 
+/// The stub of a module definition
 impl From<&fpp_ast::DefModule> for DefModuleStub {
     fn from(value: &fpp_ast::DefModule) -> Self {
         Self {
@@ -47,21 +55,39 @@ pub enum Symbol {
     StateMachine(Arc<fpp_ast::DefStateMachine>),
     StructType(Arc<fpp_ast::DefStruct>),
     System(Arc<fpp_ast::DefSystem>),
+    Template(Arc<fpp_ast::DefModuleTemplate>),
     Topology(Arc<fpp_ast::DefTopology>),
+    /// A constant template parameter bound to a constant template argument
+    TemplateConstantArg {
+        param_def: Arc<fpp_ast::TemplateParamConstant>,
+        value: Arc<fpp_ast::Expr>,
+    },
+    /// A type template parameter bound to a type template argument
+    TemplateTypeArg {
+        param_def: Arc<fpp_ast::TemplateParamType>,
+        value: Arc<fpp_ast::TypeName>,
+    },
+    /// A port interface instance template parameter bound to a port interface
+    /// instance template argument
+    TemplateInterfaceArg {
+        param_def: Arc<fpp_ast::TemplateParamInterface>,
+        value: Arc<fpp_ast::QualIdent>,
+    },
 }
 
 impl Symbol {
-    /// The unqualified (leaf) name of this symbol.
+    /// Gets the unqualified name of the symbol
     pub fn unqualified_name(&self) -> &str {
         &self.name().data
     }
 
-    /// The fully-qualified name of this symbol.
+    /// The qualified name of the symbol in an analysis.
+    /// See [`Analysis::get_qualified_name`].
     pub fn qualified_name(&self, a: &Analysis) -> String {
         a.get_qualified_name(self)
     }
 
-    /// The parent (enclosing) symbol, if any.
+    /// The parent (enclosing) symbol of the symbol in an analysis, if any
     pub fn parent<'a>(&self, a: &'a Analysis) -> Option<&'a Symbol> {
         a.parent_symbol_map.get(self)
     }
@@ -76,6 +102,28 @@ impl Symbol {
             Symbol::StructType(def) => def.is_dictionary_def,
             _ => false,
         }
+    }
+
+    /// Whether this is a template argument symbol: a template parameter bound
+    /// to a template argument. It is not a global definition, so it has no
+    /// qualified name.
+    pub fn is_template_arg(&self) -> bool {
+        matches!(
+            self,
+            Symbol::TemplateConstantArg { .. }
+                | Symbol::TemplateTypeArg { .. }
+                | Symbol::TemplateInterfaceArg { .. }
+        )
+    }
+
+    /// Whether this is a port interface instance symbol
+    pub fn is_interface_instance(&self) -> bool {
+        matches!(
+            self,
+            Symbol::ComponentInstance(_)
+                | Symbol::Topology(_)
+                | Symbol::TemplateInterfaceArg { .. }
+        )
     }
 }
 
@@ -95,8 +143,15 @@ impl SymbolInterface for Symbol {
             Symbol::StateMachine(node) => node.node_id,
             Symbol::StructType(node) => node.node_id,
             Symbol::System(node) => node.node_id,
+            Symbol::Template(node) => node.node_id,
             Symbol::Topology(node) => node.node_id,
             Symbol::Port(node) => node.node_id,
+            // A bound template parameter is identified by the argument bound to
+            // it, so that two expansions of the same template with different
+            // arguments give distinct symbols
+            Symbol::TemplateConstantArg { value, .. } => value.node_id,
+            Symbol::TemplateTypeArg { value, .. } => value.node_id,
+            Symbol::TemplateInterfaceArg { value, .. } => value.id(),
         }
     }
 
@@ -115,8 +170,12 @@ impl SymbolInterface for Symbol {
             Symbol::StateMachine(def) => &def.name,
             Symbol::StructType(def) => &def.name,
             Symbol::System(def) => &def.name,
+            Symbol::Template(def) => &def.name,
             Symbol::Topology(def) => &def.name,
             Symbol::Port(def) => &def.name,
+            Symbol::TemplateConstantArg { param_def, .. } => &param_def.name,
+            Symbol::TemplateTypeArg { param_def, .. } => &param_def.name,
+            Symbol::TemplateInterfaceArg { param_def, .. } => &param_def.name,
         }
     }
 }

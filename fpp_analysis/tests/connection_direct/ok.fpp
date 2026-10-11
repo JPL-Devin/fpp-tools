@@ -61,7 +61,7 @@ topology T {
     c1.serialOut -> c2.pIn
     c1.pOut -> c2.serialIn
     c1.serialOut -> c2.serialIn
-
+    
     # Matched connections to matched component instance ports
     c3.pOut -> c5.pIn
     c5.pOut -> c3.pIn

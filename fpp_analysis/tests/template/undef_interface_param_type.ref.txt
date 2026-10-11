@@ -1,8 +1,7 @@
- --> [ local path prefix ]/template/undef_interface_param_type.fpp:1:8
+ --> [ local path prefix ]/template/undef_interface_param_type.fpp:1:31
   |
-1 | module template T(interface i: S) {}
-  |        ^^^^^^^^ syntax error: unexpected token
+1 | module template T(instance i: S) {}
+  |                               ^ symbol S is not defined
   |
-  = note: expected {
-  = note: got identifier
+  = note: looking for a interface here
 

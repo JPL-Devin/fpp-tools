@@ -1,7 +1,5 @@
-use crate::Diagnosed;
-use fpp_ast::{MoveWalkable, MutVisitor, Node, TransUnit, Visitor};
+use fpp_ast::{DefModuleTemplate, ModuleMember, MutVisitor, QualIdent, Replicator, TransUnit};
 use fpp_core::{SourceFile, Spanned};
-use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
 pub struct Input {
@@ -63,47 +61,113 @@ pub fn parse(inputs: Vec<Input>) -> Vec<TransUnit> {
         .collect()
 }
 
-/// Run the expansion passes
-pub fn expand(units: &mut [TransUnit]) {
+/// Synthesize the implicit `enum State` of each state machine that has a body, so
+/// that the enum `fpp-to-cpp` generates for it is part of the model.
+///
+/// An external (bodyless) state machine declares no states, so it gets none.
+///
+/// Reaches a state machine written in a `module template` body, and not the members
+/// an expansion specifier has materialized, so it belongs before
+/// [`expand_templates`]: run in that order every copy of a template carries the enums
+/// the body's state machines were given.
+pub fn add_state_enums(units: &mut [TransUnit]) {
     for unit in units {
         fpp_parser::add_state_enums(unit);
     }
 }
 
-/// Fail if any `include` specifier survived resolution, which means definitions in
-/// the model are invisible to this tool.
+/// Replace each template expansion specifier with the members of the template it
+/// names, so that the definitions an expansion contributes are part of the model.
 ///
-/// `fpp_parser::ResolveIncludes` handles `include` inside a module, component,
-/// topology, telemetry packet, and telemetry packet set. It does not handle
-/// `state machine` or `state` bodies, so those are what this catches.
-pub fn check_unresolved_includes(units: &[TransUnit]) -> Result<(), Diagnosed> {
-    struct FindInclude;
-    impl<'ast> Visitor<'ast> for FindInclude {
-        type Break = ();
-        type State = bool;
+/// The template name is resolved syntactically, by the scoping rules for a
+/// qualified identifier: the innermost enclosing module outward. `fpp-check`
+/// resolves it through the symbol table instead, but this tool sees one module of
+/// a larger build, so a name that does not resolve here simply contributes
+/// nothing — the same answer this tool gives for any definition it cannot see.
+pub fn expand_templates(units: &mut [TransUnit]) {
+    let templates = collect_templates(units);
+    for unit in units {
+        let mut scope: Vec<String> = Vec::new();
+        for member in &mut unit.0 {
+            expand_member(&templates, &mut scope, member);
+        }
+    }
+}
 
-        fn super_visit(&self, found: &mut bool, node: Node<'ast>) -> ControlFlow<()> {
-            if let Node::SpecInclude(spec) = node {
-                spec.span()
-                    .error(
-                        "this `include` was not resolved, so definitions inside it are invisible",
-                    )
-                    .note(format!(
-                        "cannot read the members of `{}` here",
-                        spec.file.data
-                    ))
-                    .note(
-                        "`include` inside a `state machine` or `state` body is not yet supported; \
-                         move those definitions into the file that needs them",
-                    )
-                    .emit();
-                *found = true;
+/// The module templates of the model, by qualified name
+fn collect_templates(units: &[TransUnit]) -> Vec<(Vec<String>, DefModuleTemplate)> {
+    fn walk(
+        out: &mut Vec<(Vec<String>, DefModuleTemplate)>,
+        scope: &mut Vec<String>,
+        members: &[ModuleMember],
+    ) {
+        for member in members {
+            match member {
+                ModuleMember::DefModule(def) => {
+                    scope.push(def.name.data.clone());
+                    walk(out, scope, &def.members);
+                    scope.pop();
+                }
+                ModuleMember::DefModuleTemplate(def) => {
+                    let mut name = scope.clone();
+                    name.push(def.name.data.clone());
+                    out.push((name, def.clone()));
+                }
+                _ => {}
             }
-            node.walk(found, self)
         }
     }
 
-    let mut found = false;
-    let _ = FindInclude.visit_trans_units(&mut found, units.iter());
-    if found { Err(Diagnosed) } else { Ok(()) }
+    let mut out = Vec::new();
+    for unit in units {
+        walk(&mut out, &mut Vec::new(), &unit.0);
+    }
+    out
+}
+
+/// Look up a template by the name a specifier writes, trying the innermost
+/// enclosing scope first. An absolute name is looked up in the global scope only.
+fn look_up<'t>(
+    templates: &'t [(Vec<String>, DefModuleTemplate)],
+    scope: &[String],
+    name: &QualIdent,
+) -> Option<&'t DefModuleTemplate> {
+    let ident_list = name.to_ident_list();
+    let innermost = if name.is_absolute() { 0 } else { scope.len() };
+    for prefix_len in (0..=innermost).rev() {
+        let candidate = scope[..prefix_len].iter().chain(&ident_list);
+        if let Some((_, def)) = templates
+            .iter()
+            .find(|(qualified, _)| qualified.iter().eq(candidate.clone()))
+        {
+            return Some(def);
+        }
+    }
+    None
+}
+
+fn expand_member(
+    templates: &[(Vec<String>, DefModuleTemplate)],
+    scope: &mut Vec<String>,
+    member: &mut ModuleMember,
+) {
+    match member {
+        ModuleMember::DefModule(def) => {
+            scope.push(def.name.data.clone());
+            for member in &mut def.members {
+                expand_member(templates, scope, member);
+            }
+            scope.pop();
+        }
+        ModuleMember::SpecTemplateExpand(spec) => {
+            let Some(def) = look_up(templates, scope, &spec.template) else {
+                return;
+            };
+            let replicator = Replicator::new(spec.span());
+            let mut members = def.members.clone();
+            replicator.apply(&mut members);
+            spec.members = Some(members);
+        }
+        _ => {}
+    }
 }

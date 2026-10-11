@@ -51,6 +51,7 @@ pub enum SyntaxKind {
     EVENT_KW,
     EVERY_KW,
     EXIT_KW,
+    EXPAND_KW,
     EXTERNAL_KW,
     F32_KW,
     F64_KW,
@@ -121,6 +122,7 @@ pub enum SyntaxKind {
     SYNC_KW,
     SYSTEM_KW,
     TELEMETRY_KW,
+    TEMPLATE_KW,
     TEXT_KW,
     THROTTLE_KW,
     TIME_KW,
@@ -177,6 +179,7 @@ pub enum SyntaxKind {
     DEF_ENUM_CONSTANT,
     DEF_INTERFACE,
     DEF_MODULE,
+    DEF_MODULE_TEMPLATE,
     DEF_PORT,
     DEF_STRUCT,
     DEF_SYSTEM,
@@ -206,6 +209,7 @@ pub enum SyntaxKind {
     SPEC_STATE_EXIT,
     SPEC_STATE_MACHINE_INSTANCE,
     SPEC_STATE_TRANSITION,
+    SPEC_TEMPLATE_EXPAND,
     SPEC_TELEMETRY,
     SPEC_PARAM,
     SPEC_INSTANCE,
@@ -269,6 +273,10 @@ pub enum SyntaxKind {
     STATE_MEMBER_LIST,
     STRUCT_MEMBER,
     STRUCT_MEMBER_LIST,
+    TEMPLATE_ARG,
+    TEMPLATE_ARG_LIST,
+    TEMPLATE_PARAM,
+    TEMPLATE_PARAM_LIST,
     THEN_CLAUSE,
     TRANSITION_EXPR,
     TYPE_NAME,
@@ -330,6 +338,7 @@ impl SyntaxKind {
                 | DEF_ENUM_CONSTANT
                 | DEF_INTERFACE
                 | DEF_MODULE
+                | DEF_MODULE_TEMPLATE
                 | DEF_PORT
                 | DEF_STRUCT
                 | DEF_ACTION
@@ -361,6 +370,7 @@ impl SyntaxKind {
                 | SPEC_STATE_EXIT
                 | SPEC_STATE_MACHINE_INSTANCE
                 | SPEC_STATE_TRANSITION
+                | SPEC_TEMPLATE_EXPAND
                 | SPEC_TELEMETRY
                 | SPEC_PARAM
         )
@@ -428,6 +438,7 @@ impl SyntaxKind {
                 | EVENT_KW
                 | EVERY_KW
                 | EXIT_KW
+                | EXPAND_KW
                 | EXTERNAL_KW
                 | F32_KW
                 | F64_KW
@@ -498,6 +509,7 @@ impl SyntaxKind {
                 | SYNC_KW
                 | SYSTEM_KW
                 | TELEMETRY_KW
+                | TEMPLATE_KW
                 | TEXT_KW
                 | THROTTLE_KW
                 | TIME_KW
@@ -514,6 +526,56 @@ impl SyntaxKind {
                 | WITH_KW
                 | YELLOW_KW
         )
+    }
+
+    /// The name of this kind in a diagnostic: the source text of a symbol or
+    /// a keyword, or the name of the construct (Scala's `accept` names).
+    pub fn display_name(self) -> String {
+        let symbol = match self {
+            IDENT | QUAL_IDENT | NAME | NAME_REF => "identifier",
+            EXPR => "expression",
+            TYPE_NAME => "type name",
+            LITERAL_FLOAT => "floating-point literal",
+            LITERAL_INT => "integer literal",
+            LITERAL_STRING => "string literal",
+            PRE_ANNOTATION => "pre annotation",
+            POST_ANNOTATION => "post annotation",
+            EOF => "end of input",
+            EOL => "end of line",
+            COLON => ":",
+            COMMA => ",",
+            DOT => ".",
+            EQUALS => "=",
+            LEFT_PAREN => "(",
+            LEFT_CURLY => "{",
+            LEFT_SQUARE => "[",
+            RIGHT_PAREN => ")",
+            RIGHT_CURLY => "}",
+            RIGHT_SQUARE => "]",
+            RIGHT_ARROW => "->",
+            MINUS => "-",
+            PLUS => "+",
+            SEMI => ";",
+            SLASH => "/",
+            STAR => "*",
+            SHIFT_LEFT => "<<",
+            SHIFT_RIGHT => ">>",
+            _ => "",
+        };
+        if !symbol.is_empty() {
+            return symbol.to_string();
+        }
+        let name = format!("{:?}", self);
+        match name.strip_suffix("_KW") {
+            // The integer and floating-point type keywords are upper case
+            Some(kw)
+                if self.is_type_primitive_keyword() && !matches!(self, BOOL_KW | STRING_KW) =>
+            {
+                kw.to_string()
+            }
+            Some(kw) => kw.to_ascii_lowercase(),
+            None => name.to_ascii_lowercase().replace('_', " "),
+        }
     }
 
     /// Check if this syntax kind is a member list that should be indented
@@ -538,6 +600,8 @@ impl SyntaxKind {
                 | LIMIT_SEQUENCE
                 | INIT_SPEC_LIST
                 | FORMAL_PARAM_LIST
+                | TEMPLATE_PARAM_LIST
+                | TEMPLATE_ARG_LIST
                 | EXPR_STRUCT_MEMBER_LIST
                 | EXPR_ARRAY_MEMBER_LIST
                 | PATTERN_TARGET_MEMBER_LIST

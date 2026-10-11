@@ -8,6 +8,10 @@
 //! Include resolution runs at *both* depths: it reads files, but it is a purely
 //! syntactic splice, and without it a syntax tree would have `SpecInclude` holes
 //! where members belong.
+//!
+//! Template expansion does not: resolving `expand T` to the template it names
+//! needs a symbol table, so it belongs to the analysis and runs at [`Depth::Full`]
+//! only. A `SpecTemplateExpand` from `parse` therefore has no `members`.
 
 use crate::diagnostics::{OwnedDiagnostic, SharedEmitter};
 use crate::ir_core::{ModelData, UnitData};
@@ -56,7 +60,8 @@ impl pyo3_stub_gen::PyStubType for Paths {
 enum Depth {
     /// Parse + include resolution.
     Syntax,
-    /// ...then `add_state_enums` + `check_semantics`.
+    /// The whole of `CheckSemantics::tu_list`: include resolution, the state
+    /// enums, symbol entering, template expansion and the semantic checks.
     Full,
 }
 
@@ -124,36 +129,53 @@ fn run_pipeline(inputs: Vec<UnitInput>, depth: Depth) -> (ModelData, Vec<OwnedDi
     let emitter = SharedEmitter::default();
     let mut ctx = fpp_core::CompilerContext::new(emitter.clone());
     let (units, analysis, tables, by_qualified_name) = fpp_core::run(&mut ctx, || {
-        // `resolve_includes` needs an `Analysis` only for its `include_context_map`,
+        // Include resolution needs an `Analysis` only for its `include_context_map`,
         // so the same one accumulates across all units.
         let mut analysis = fpp_analysis::Analysis::new();
-        let mut units: Vec<UnitData> = inputs
-            .into_iter()
-            .map(|input| {
-                let src = fpp_core::SourceFile::new(&input.uri, input.content);
-                let mut tu = fpp_parser::parse(src, |p| p.trans_unit(), None);
+        // The syntax trees are collected apart from the per-unit bookkeeping because
+        // template resolution below takes them as one contiguous slice.
+        let mut labels: Vec<(String, bool)> = Vec::with_capacity(inputs.len());
+        let mut trans_units: Vec<fpp_ast::TransUnit> = Vec::with_capacity(inputs.len());
+        for input in inputs {
+            let src = fpp_core::SourceFile::new(&input.uri, input.content);
+            let mut tu = fpp_parser::parse(src, |p| p.trans_unit(), None);
+            if depth == Depth::Syntax {
                 let _ = fpp_analysis::resolve_includes(&mut analysis, fpp_fs::FsReader {}, &mut tu);
-                if depth == Depth::Full {
-                    fpp_analysis::add_state_enums(&mut tu);
-                }
-                UnitData {
-                    uri: input.uri,
-                    tu,
-                    roots: Vec::new(),
-                    is_source: input.is_source,
-                    // Filled by the walk below.
-                    id_range: 0..0,
-                }
-            })
-            .collect();
+            }
+            labels.push((input.uri, input.is_source));
+            trans_units.push(tu);
+        }
 
         // All units at once, so a definition in one resolves uses in any other —
         // which is the whole point of an import: it is analyzed exactly like a
         // source, and only `UnitData::is_source` tells them apart afterwards.
+        //
+        // `CheckSemantics::tu_list` resolves the includes, enters the model's
+        // symbols and splices a copy of each expanded template body into the AST,
+        // so it has to precede the walk below. It stops before the semantic checks
+        // when symbol entering or template expansion fails, since checking
+        // semantics against an incomplete symbol table would bury the real
+        // diagnostic under a cascade of unresolved names.
         if depth == Depth::Full {
-            let _ =
-                fpp_analysis::check_semantics(&mut analysis, units.iter().map(|u| &u.tu).collect());
+            let _ = fpp_analysis::CheckSemantics::tu_list(
+                &mut analysis,
+                fpp_fs::FsReader {},
+                &mut trans_units,
+            );
         }
+
+        let mut units: Vec<UnitData> = labels
+            .into_iter()
+            .zip(trans_units)
+            .map(|((uri, is_source), tu)| UnitData {
+                uri,
+                tu,
+                roots: Vec::new(),
+                is_source,
+                // Filled by the walk below.
+                id_range: 0..0,
+            })
+            .collect();
 
         // Last, now that no AST will change again. Collecting the roots first keeps
         // the `&u.tu` borrows out of the way of the `roots` writes; neither step
@@ -208,7 +230,8 @@ fn run_off_gil(
 ///
 /// This is the fast front end: the nodes it yields carry locations, annotations,
 /// and children, but no resolved symbols, types, or values. Use `analyze` for
-/// those.
+/// those. A `SpecTemplateExpand` is likewise left unexpanded — its `members` is
+/// `None` — because naming the template it expands is already a symbol lookup.
 ///
 /// There is no `imports=` here, unlike `analyze`: nothing at this depth reads
 /// another translation unit, so every unit `parse` returns is a source.
@@ -239,7 +262,9 @@ fn parse(
 /// about are `[u for u in model.ast if u.is_source]`.
 /// `imports` alone is not enough to compile: it raises `ValueError`.
 ///
-/// `model.ast` is the *transformed* AST after running analysis transformations
+/// `model.ast` is the *transformed* AST after running analysis transformations —
+/// so each `SpecTemplateExpand` in it carries the expanded template body in its
+/// `members`.
 ///
 /// Raises `OSError` if a path cannot be read, `ValueError` if no source is given.
 #[gen_stub_pyfunction]

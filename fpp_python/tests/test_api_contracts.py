@@ -278,8 +278,13 @@ def test_the_unions_are_discoverable():
     # nest by the same mechanism and gained a base class in the process — before it,
     # `ExprKind` was not a Python object at all.
     assert {"Symbol", "Type", "Value", "Command", "NonParamKind"} <= set(_union_bases())
-    assert set(_union_bases(fa)) == {"ExprKind", "TypeNameKind", "TransitionOrDo"}
-    assert len(_union_bases()) == 16, sorted(_union_bases())
+    assert set(_union_bases(fa)) == {
+        "ExprKind",
+        "TypeNameKind",
+        "TransitionOrDo",
+        "TemplateArgKind",
+    }
+    assert len(_union_bases()) == 17, sorted(_union_bases())
 
 
 def test_a_kind_enum_is_answerable_with_isinstance():
@@ -319,9 +324,9 @@ def test_every_variant_is_nested_on_its_base(module_name, union):
         assert variant.__module__ == module_name
 
 
-def test_symbol_has_its_fifteen_variants():
+def test_symbol_has_its_nineteen_variants():
     variants = typing.get_args(f.Symbol.Variant)
-    assert len(variants) == 15
+    assert len(variants) == 19
     assert f.Symbol not in variants, "Symbol has no instantiable base"
 
 
@@ -486,7 +491,7 @@ def test_a_sized_string_outside_a_type_definition_reaches_the_semantic_type():
 def test_an_invalid_string_size_is_reported_outside_a_type_definition_too():
     bad = f.analyze(source=FRAMEWORK + "module M { port P(m: string size -1) }")
     assert bad.has_errors
-    assert "negative string sizes" in bad.diagnostics[0].message
+    assert "invalid string size -1" in bad.diagnostics[0].message
 
 
 # --- sources vs imports --------------------------------------------------
@@ -650,7 +655,7 @@ def test_diagnostic_display_is_one_indexed_and_location_is_zero_indexed():
     assert diagnostic.location.line == 0
     assert diagnostic.location.column == 27
     assert diagnostic.display == (
-        "<string>:1:28: error: cannot find type `Nope` in scope"
+        "<string>:1:28: error: symbol Nope is not defined"
     )
     assert repr(diagnostic) == f"<Diagnostic {diagnostic.display}>"
 
@@ -663,7 +668,9 @@ def test_diagnostic_str_is_the_console_rendering():
         " --> <string>:1:28\n"
         "  |\n"
         "1 | module Bad { struct S { x: Nope } }\n"
-        "  |                            ^^^^ cannot find type `Nope` in scope"
+        "  |                            ^^^^ symbol Nope is not defined\n"
+        "  |\n"
+        "  = note: looking for a type here"
     )
 
 
@@ -673,13 +680,17 @@ def test_diagnostic_exposes_its_source_excerpt_and_children():
     )
     (redefinition, *_) = [d for d in bad.diagnostics if d.children]
     assert redefinition.source == "  constant a = 2\n"
+    # Neither chain that can put an excerpt somewhere other than where it was
+    # written applies to source compiled directly and outside any expansion.
     assert redefinition.includes == []
+    assert redefinition.expansions == []
     (child, *_) = redefinition.children
     # A child points at the first definition, with its own excerpt, and renders
     # under the primary annotation.
     assert child.kind in (f.DiagnosticMessageKind.Annotation, f.DiagnosticMessageKind.Note)
     assert child.location.line == 1
     assert child.source == "  constant a = 1\n"
+    assert child.includes == child.expansions == []
     assert child.message in str(redefinition)
 
 
@@ -792,7 +803,7 @@ def test_a_diagnostic_error_carries_a_diagnostic_or_nothing_at_all():
 def test_model_diagnostics_are_freshly_built_on_each_read():
     bad = f.analyze(source="module Bad { struct S { x: Nope } }")
     bad.diagnostics[0].message = "rewritten"
-    assert bad.diagnostics[0].message == "cannot find type `Nope` in scope"
+    assert bad.diagnostics[0].message == "symbol Nope is not defined"
 
 
 def test_a_diagnostics_level_and_kind_are_enums_not_strings():
@@ -840,9 +851,9 @@ module Ref {
         return str(a.type_map[m.lookup(name).node_id])
 
     assert spelled("Ref.Abs") == "Abs"
-    assert spelled("Ref.Arr") == "Arr"
-    assert spelled("Ref.E") == "E"
-    assert spelled("Ref.Simple") == "Simple"
+    assert spelled("Ref.Arr") == "array Arr"
+    assert spelled("Ref.E") == "enum E"
+    assert spelled("Ref.Simple") == "struct Simple"
 
     simple = a.type_map[m.lookup("Ref.Simple").node_id]
     anon = simple.anon_struct
@@ -853,7 +864,7 @@ module Ref {
     # Every member renders by `Display` too, so an aggregate stays one line.
     assert (
         str(simple.anon_struct)
-        == "anonymous struct { b: boolean, f: F32, x: U32, y: string }"
+        == "{ x: U32, y: string, b: bool, f: F32 }"
     )
 
     arr = a.type_map[m.lookup("Ref.Arr").node_id]
@@ -874,7 +885,7 @@ def test_repr_names_the_concrete_class_and_identifies_the_value():
 
     # A type: the class, then the compiler's rendering of the value.
     array = a.type_map[m.lookup("M.A").node_id]
-    assert repr(array) == "<Type.Array A>"
+    assert repr(array) == "<Type.Array array A>"
     assert repr(array.anon_array.elt_type) == "<Type.PrimitiveInt U32>"
 
     # A value: likewise, so a folded constant reads as what it folded to.

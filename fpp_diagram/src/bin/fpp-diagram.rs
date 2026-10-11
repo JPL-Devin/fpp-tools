@@ -2,8 +2,8 @@
 //!
 //! Reads an FPP source file (or stdin), runs semantic analysis, and lowers the
 //! named element to a diagram, emitting either Mermaid `stateDiagram-v2` source
-//! (state machines) or sprotty `SModel` JSON to stdout. Diagnostics go to
-//! stderr; a nonzero exit code signals an analysis error.
+//! (state machines) or sprotty `SModel` JSON to stdout. A nonzero exit code
+//! signals an analysis error.
 
 use std::io::Read;
 use std::process::exit;
@@ -117,9 +117,11 @@ fn main() {
         let mut ast = fpp_parser::parse(src, |p| p.trans_unit(), None);
 
         let mut a = fpp_analysis::Analysis::new();
-        let _ = fpp_analysis::resolve_includes(&mut a, fpp_fs::FsReader {}, &mut ast);
-        fpp_analysis::add_state_enums(&mut ast);
-        let _ = fpp_analysis::check_semantics(&mut a, vec![&ast]);
+        let _ = fpp_analysis::CheckSemantics::tu_list(
+            &mut a,
+            fpp_fs::FsReader {},
+            std::slice::from_mut(&mut ast),
+        );
 
         lower(&a, &args)
     });
