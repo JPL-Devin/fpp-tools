@@ -576,14 +576,20 @@
             }
         ]
     },
+    "bin": {
+        "fpp-diagram-render": "./dist/fpp-diagram-render.js"
+    },
     "scripts": {
         "vscode:prepublish": "rm -rf dist && yarn package",
         "package": "webpack --mode production",
         "build": "webpack --mode development",
         "watch": "webpack --mode development --watch",
         "compile": "tsc -p ./src --noEmit",
+        "compile:cli": "tsc -p ./cli --noEmit",
+        "render": "node ./dist/fpp-diagram-render.js",
         "test:smoke": "node ./test/smoke.js",
-        "test": "yarn compile && yarn build && yarn test:smoke",
+        "test:render": "node ./test/smoke-render.js",
+        "test": "yarn compile && yarn compile:cli && yarn build && yarn test:smoke && yarn test:render",
         "vsix": "vsce package"
     },
     "dependencies": {
