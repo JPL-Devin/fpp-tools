@@ -1,0 +1,18 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "outDir": "../out/cli",
+    "lib": ["es2021"],
+    "types": ["node"],
+    "declaration": false,
+    "declarationMap": false,
+    "strict": true
+  },
+  "include": [
+    ".",
+    "../src/diagram/layout.ts",
+    "../src/diagram/layout-config.ts",
+    "../common"
+  ]
+}

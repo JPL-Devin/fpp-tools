@@ -1,0 +1,6 @@
+{"id":"root","type":"graph","children":[{"id":"Demo.Widget","type":"node:component","kind":"active","children":[
+{"id":"Demo.Widget.label.name","type":"label:node:component","text":"Widget","size":{"width":100,"height":15}},
+{"id":"Demo.Widget.cmdIn.0","type":"port","kind":"async","isOutput":false,"size":{"width":10,"height":10},"children":[{"id":"Demo.Widget.cmdIn.0.label","type":"label:port","text":"cmdIn","size":{"width":50,"height":10}}]},
+{"id":"Demo.Widget.tlmIn.0","type":"port","kind":"guarded","isOutput":false,"size":{"width":10,"height":10},"children":[{"id":"Demo.Widget.tlmIn.0.label","type":"label:port","text":"tlmIn","size":{"width":50,"height":10}}]},
+{"id":"Demo.Widget.tlmOut.0","type":"port","kind":"output","isOutput":true,"size":{"width":10,"height":10},"children":[{"id":"Demo.Widget.tlmOut.0.label","type":"label:port","text":"tlmOut","size":{"width":50,"height":10}}]}
+]}]}
