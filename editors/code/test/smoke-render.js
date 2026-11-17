@@ -75,6 +75,11 @@ function translateX(svg, id) {
         const compact = run(["--fpp-diagram", bin, "--name", "Rover.Mobility", "--compact-ports", deployment]);
         assert.ok(compact.includes(">motorOut: [6] Fw.Buffer</text>"), "compact port label");
         assert.ok(!compact.includes('id="Rover.Mobility.motorOut.1"'), "array drawn once");
+        assert.ok(compact.includes(">timeCaller: Fw.Time</text>"), "special ports are drawn by default");
+        const general = run(["--fpp-diagram", bin, "--name", "Rover.Mobility", "--compact-ports",
+            "--hide-special-ports", deployment]);
+        assert.ok(!general.includes("timeCaller"), "special ports are left out on request");
+        assert.ok(general.includes(">motorOut: [6] Fw.Buffer</text>"), "general ports stay");
 
         // Collapsed topology of an FPP-only design: imported topologies are
         // single dashed nodes, parallel wires are a bus, implicit wires are dashed.

@@ -27,6 +27,7 @@ interface CliArgs {
     collapsed: boolean;
     bundleEdges: boolean;
     compactPorts: boolean;
+    hideSpecialPorts: boolean;
     hidePatternConnections: boolean;
     document?: string;
     theme: Theme;
@@ -54,6 +55,8 @@ options:
                          (command, events, telemetry, time, ...) (topologies)
   --compact-ports        one port per declaration, labelled "name: [size] Type"
                          (components)
+  --hide-special-ports   leave out command, event, telemetry, time and parameter
+                         ports (components)
   --document <dir>       topology only: write the collapsed diagram of --name and
                          of every topology it imports, a Markdown fragment
                          (<name>.md) and an interactive page (<name>.html)
@@ -65,7 +68,7 @@ each file and inlined before analysis.`;
 
 function parseArgs(argv: string[]): CliArgs {
     const args: CliArgs = { kind: DiagramType.component, hideUnusedPorts: false, collapsed: false, bundleEdges: false,
-        compactPorts: false, hidePatternConnections: false, theme: "dark", files: [],
+        compactPorts: false, hideSpecialPorts: false, hidePatternConnections: false, theme: "dark", files: [],
     };
     for (let i = 0; i < argv.length; i++) {
         const a = argv[i];
@@ -95,6 +98,7 @@ function parseArgs(argv: string[]): CliArgs {
             }
             case "--bundle-edges": args.bundleEdges = true; break;
             case "--compact-ports": args.compactPorts = true; break;
+            case "--hide-special-ports": args.hideSpecialPorts = true; break;
             case "--hide-pattern-connections": args.hidePatternConnections = true; break;
             case "--document": args.document = next(); break;
             case "--theme": {
@@ -148,6 +152,7 @@ export async function run(argv: string[]): Promise<void> {
             collapsed: args.collapsed,
             bundleEdges: args.bundleEdges,
             compactPorts: args.compactPorts,
+            hideSpecialPorts: args.hideSpecialPorts,
             hidePatternConnections: args.hidePatternConnections,
         });
     }

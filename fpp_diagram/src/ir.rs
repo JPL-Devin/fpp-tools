@@ -299,6 +299,20 @@ impl Diagram {
     /// label it as FPP declares it: `name: [size] Type` (`serial` for serial
     /// ports, the bare name for internal ports).
     ///
+    /// Drop the framework special ports (command, event, telemetry, time,
+    /// parameter, ...) of a component diagram, leaving its general and
+    /// internal ports. Topology diagrams are left alone: their edges may end
+    /// on special ports.
+    pub fn remove_special_ports(&mut self) {
+        if self.kind != DiagramKind::Component {
+            return;
+        }
+        for node in &mut self.nodes {
+            node.ports
+                .retain(|p| !matches!(p.kind, PortKind::Special(_)));
+        }
+    }
+
     /// Only [`DiagramKind::Component`] diagrams are changed: they have no edges,
     /// so no connection endpoint can refer to a dropped element.
     pub fn compact_ports(&mut self) {

@@ -176,3 +176,27 @@ fn all_three_command_pattern_graphs_are_left_out() {
         assert!(d.edges.is_empty());
     });
 }
+
+#[test]
+fn special_ports_can_be_left_out_of_component_diagrams() {
+    with_analysis(MODEL, |a| {
+        let mut d = fpp_diagram::lower(a, DiagramKind::Component, "M.C").unwrap();
+        d.remove_special_ports();
+        d.compact_ports();
+        assert_eq!(
+            labels(&d),
+            vec![
+                "one: M.P",
+                "out: [2] M.P",
+                "raw: serial",
+                "run: [3] M.P",
+                "tick"
+            ]
+        );
+
+        let mut t = fpp_diagram::lower(a, DiagramKind::Topology, "M.T").unwrap();
+        let before = t.clone();
+        t.remove_special_ports();
+        assert_eq!(t, before, "time edges end on special ports");
+    });
+}

@@ -137,6 +137,7 @@ pub fn handle_diagram(
             topology_view: params.topology_view.into(),
             bundle_edges: params.bundle_edges,
             compact_ports: false,
+            hide_special_ports: false,
             hide_pattern_connections: false,
         },
     )
