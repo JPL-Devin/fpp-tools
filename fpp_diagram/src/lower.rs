@@ -562,7 +562,16 @@ impl<'a> CollapsedScope<'a> {
     /// port) lands: a rendered port, or the boundary of a collapsed node.
     fn resolve_end(&self, pii: &PortInstanceIdentifier, index: i128) -> Option<End> {
         let port_name = pii.port_instance.get_unqualified_name();
-        match &pii.interface_instance {
+        self.resolve_instance_end(&pii.interface_instance, port_name, index)
+    }
+
+    fn resolve_instance_end(
+        &self,
+        instance: &InterfaceInstance,
+        port_name: &str,
+        index: i128,
+    ) -> Option<End> {
+        match instance {
             InterfaceInstance::Topology(t) => {
                 if self.imported.contains_key(&t.qualified_name) {
                     return Some(End::Port(Port::make_id(
@@ -572,7 +581,7 @@ impl<'a> CollapsedScope<'a> {
                     )));
                 }
                 // Not a collapsed node here: follow the alias to what it names.
-                let aliased = pii.interface_instance.as_topology(self.a)?;
+                let aliased = instance.as_topology(self.a)?;
                 let tp = aliased.port_map.get(port_name)?;
                 self.resolve_end(&tp.pii, index)
             }
@@ -584,6 +593,10 @@ impl<'a> CollapsedScope<'a> {
                     index,
                 ))),
             },
+            // A bound template parameter stands for the instance it was bound to.
+            InterfaceInstance::TemplateArg(arg) => {
+                self.resolve_instance_end(&arg.instance, port_name, index)
+            }
         }
     }
 
