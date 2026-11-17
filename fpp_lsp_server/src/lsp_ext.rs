@@ -95,6 +95,33 @@ pub struct DiagramParams {
     /// [`TransitionActionMode::Uml`] when the client omits it.
     #[serde(default)]
     pub transition_action_mode: TransitionActionMode,
+    /// How imported topologies are drawn in topology diagrams. Defaults to
+    /// [`TopologyView::Flattened`] when the client omits it.
+    #[serde(default)]
+    pub topology_view: TopologyView,
+    /// When true, parallel wires between the same two elements are bundled
+    /// into one bus edge carrying a wire count. Defaults to false when the
+    /// client omits it.
+    #[serde(default)]
+    pub bundle_edges: bool,
+}
+
+/// Mirrors [`fpp_diagram::TopologyView`] on the wire.
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize, Clone, Copy, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum TopologyView {
+    #[default]
+    Flattened,
+    Collapsed,
+}
+
+impl From<TopologyView> for fpp_diagram::TopologyView {
+    fn from(view: TopologyView) -> Self {
+        match view {
+            TopologyView::Flattened => fpp_diagram::TopologyView::Flattened,
+            TopologyView::Collapsed => fpp_diagram::TopologyView::Collapsed,
+        }
+    }
 }
 
 /// A request to lower a topology/component/connection-group into a sprotty

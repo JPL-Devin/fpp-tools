@@ -97,8 +97,35 @@ const stateMachineWebviewConfig = {
     ...commonConfig,
 };
 
+/**@type {import('webpack').Configuration}*/
+const renderCliConfig = {
+    target: 'node',
+    entry: './cli/src/main.ts',
+    output: {
+        path: path.resolve(__dirname, 'dist'),
+        filename: 'fpp-diagram-render.js',
+        devtoolModuleFilenameTemplate: "../[resource-path]",
+    },
+    plugins: [
+        new (require('webpack').BannerPlugin)({ banner: '#!/usr/bin/env node', raw: true }),
+    ],
+    resolve: {
+        extensions: ['.ts', '.js'],
+    },
+    module: {
+        rules: [
+            {
+                test: /\.ts$/,
+                exclude: /node_modules/,
+                use: [{ loader: 'ts-loader', options: { configFile: path.resolve(__dirname, 'cli/tsconfig.json') } }],
+            },
+        ],
+    },
+};
+
 module.exports = [
     extensionConfig,
     diagramWebviewConfig,
-    stateMachineWebviewConfig
+    stateMachineWebviewConfig,
+    renderCliConfig
 ];
