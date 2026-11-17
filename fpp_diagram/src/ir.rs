@@ -232,6 +232,20 @@ pub struct Diagram {
     pub boundary_ports: Vec<Port>,
 }
 
+/// The connection graph names FPP gives the connections of its connection
+/// patterns.
+pub const PATTERN_GRAPH_NAMES: [&str; 9] = [
+    "Command",
+    "CommandRegistration",
+    "CommandResponse",
+    "Events",
+    "Health",
+    "Parameters",
+    "Telemetry",
+    "TextEvents",
+    "Time",
+];
+
 impl Port {
     /// Build the stable id for a port element under a node.
     pub fn make_id(node_id: &str, port_name: &str, index: i128) -> String {
@@ -264,6 +278,47 @@ impl Diagram {
             .collect();
         for node in &mut self.nodes {
             node.ports.retain(|p| used.contains(p.id.as_str()));
+        }
+    }
+
+    /// Remove the connections that FPP connection patterns generate (command,
+    /// event, telemetry, text event, time, health and parameter plumbing), which
+    /// join nearly every instance to a few service instances and bury the rest
+    /// of a design diagram.
+    ///
+    /// Connections are matched by connection graph name, since the resolved
+    /// model does not record a connection's origin; a hand-written graph with
+    /// one of the names in [`PATTERN_GRAPH_NAMES`] is removed as well. Call
+    /// this before [`Diagram::bundle_edges`].
+    pub fn remove_pattern_connections(&mut self) {
+        self.edges
+            .retain(|e| !PATTERN_GRAPH_NAMES.contains(&e.graph_name.as_str()));
+    }
+
+    /// Draw each declared port once instead of once per array element, and
+    /// label it as FPP declares it: `name: [size] Type` (`serial` for serial
+    /// ports, the bare name for internal ports).
+    ///
+    /// Only [`DiagramKind::Component`] diagrams are changed: they have no edges,
+    /// so no connection endpoint can refer to a dropped element.
+    pub fn compact_ports(&mut self) {
+        if self.kind != DiagramKind::Component {
+            return;
+        }
+        for node in &mut self.nodes {
+            node.ports.retain(|p| p.index == 0);
+            for port in &mut node.ports {
+                if port.kind == PortKind::Internal {
+                    port.label = port.name.clone();
+                    continue;
+                }
+                let type_name = port.type_name.as_deref().unwrap_or("serial");
+                port.label = if port.array_size > 1 {
+                    format!("{}: [{}] {}", port.name, port.array_size, type_name)
+                } else {
+                    format!("{}: {}", port.name, type_name)
+                };
+            }
         }
     }
 

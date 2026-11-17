@@ -136,6 +136,8 @@ pub fn handle_diagram(
             transition_action_mode: params.transition_action_mode.into(),
             topology_view: params.topology_view.into(),
             bundle_edges: params.bundle_edges,
+            compact_ports: false,
+            hide_pattern_connections: false,
         },
     )
     .map_err(|e| anyhow::anyhow!("{e}"))
