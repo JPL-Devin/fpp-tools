@@ -122,6 +122,7 @@ pub fn server_capabilities(caps: &ClientCapabilities) -> ServerCapabilities {
             resolve_provider: None,
             work_done_progress_options: Default::default(),
         })),
+        folding_range_provider: Some(lsp_types::FoldingRangeProviderCapability::Simple(true)),
         document_formatting_provider: Some(OneOf::Left(true)),
         document_range_formatting_provider: Some(OneOf::Left(true)),
         ..Default::default()

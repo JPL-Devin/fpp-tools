@@ -6,6 +6,7 @@ mod global_state;
 mod handlers;
 mod lsp_ext;
 mod notification;
+mod phases;
 mod request;
 mod uri;
 mod util;
@@ -146,5 +147,7 @@ fn main() -> Result<(), Box<dyn Error + Sync + Send>> {
     Ok(())
 }
 
+#[cfg(test)]
+mod phases_tests;
 #[cfg(test)]
 mod workspace_tests;

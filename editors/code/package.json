@@ -90,6 +90,18 @@
                 "category": "FPP Diagram"
             },
             {
+                "command": "fpp.diagram.toggle-collapsed-subtopologies",
+                "title": "FPP: Toggle Collapsed Subtopologies",
+                "icon": "$(group-by-ref-type)",
+                "category": "FPP Diagram"
+            },
+            {
+                "command": "fpp.diagram.toggle-bus-wires",
+                "title": "FPP: Toggle Bus Wires",
+                "icon": "$(combine)",
+                "category": "FPP Diagram"
+            },
+            {
                 "command": "fpp.stateMachine.fit",
                 "title": "FPP: Fit State Machine Diagram",
                 "icon": "$(arrow-both)",
@@ -175,6 +187,16 @@
                 },
                 {
                     "command": "fpp.diagram.toggle-unused-ports",
+                    "when": "activeWebviewPanelId == 'fppDiagrams'",
+                    "group": "navigation"
+                },
+                {
+                    "command": "fpp.diagram.toggle-collapsed-subtopologies",
+                    "when": "activeWebviewPanelId == 'fppDiagrams'",
+                    "group": "navigation"
+                },
+                {
+                    "command": "fpp.diagram.toggle-bus-wires",
                     "when": "activeWebviewPanelId == 'fppDiagrams'",
                     "group": "navigation"
                 },
@@ -576,14 +598,20 @@
             }
         ]
     },
+    "bin": {
+        "fpp-diagram-render": "./dist/fpp-diagram-render.js"
+    },
     "scripts": {
         "vscode:prepublish": "rm -rf dist && yarn package",
         "package": "webpack --mode production",
         "build": "webpack --mode development",
         "watch": "webpack --mode development --watch",
         "compile": "tsc -p ./src --noEmit",
+        "compile:cli": "tsc -p ./cli --noEmit",
+        "render": "node ./dist/fpp-diagram-render.js",
         "test:smoke": "node ./test/smoke.js",
-        "test": "yarn compile && yarn build && yarn test:smoke",
+        "test:render": "node ./test/smoke-render.js",
+        "test": "yarn compile && yarn compile:cli && yarn build && yarn test:smoke && yarn test:render",
         "vsix": "vsce package"
     },
     "dependencies": {
