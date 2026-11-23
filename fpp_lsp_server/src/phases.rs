@@ -491,8 +491,10 @@ pub fn parse_fprime_locations(contents: &str) -> Vec<(PathBuf, PathBuf)> {
         .filter(|l| !l.is_empty())
         .collect();
     lines
-        .chunks_exact(2)
-        .map(|pair| (PathBuf::from(pair[0]), PathBuf::from(pair[1])))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|[src, build]| (PathBuf::from(src), PathBuf::from(build)))
         .collect()
 }
 
