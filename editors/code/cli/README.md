@@ -76,9 +76,10 @@ topology it imports, directly or indirectly:
 - `<topology>.svg`: the collapsed, bundled diagram with unused ports hidden.
 - `<name>.md`: a Markdown fragment with the top-level image followed by one
   collapsible `<details>` block per imported topology, nested as imported, and
-  a legend. Paste or include it in the document; image paths are relative to
+  a legend. Under each image is a table of its buses: the two elements, the
+  wire count, and every connection the bus stands for as `from -> to`. Paste or include it in the document; image paths are relative to
   `<dir>`.
-- `<name>.html`: one self-contained page holding every diagram. Clicking an
+- `<name>.html`: one self-contained page holding every diagram and its bus table. Clicking an
   imported topology opens its diagram; a trail at the top leads back.
 
 Markdown renderers do not run scripts and show an SVG as a static image, so

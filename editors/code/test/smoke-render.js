@@ -116,7 +116,17 @@ function translateX(svg, id) {
         assert.ok(md.startsWith("![Topology Rover.Rover](Rover.Rover.svg)"), "top-level image first");
         assert.strictEqual((md.match(/<details>/g) || []).length, 2, "one details block per subtopology");
         assert.ok(md.includes("> ![Topology Comms.Subtopology](Comms.Subtopology.svg)"), "subtopology image");
+        // Every bus is listed under its diagram with the wires it stands for.
+        assert.ok(md.includes("| Bus | Wires | Connections |"), "bus table in the fragment");
+        const busRows = md.split("\n").filter(l => / to `[^`]+` \| \d+ \| /.test(l));
+        assert.ok(busRows.length > 0, "a row per bus");
+        for (const row of busRows) {
+            const cells = row.split(" | ");
+            assert.strictEqual(cells[2].split("<br>").length, Number(cells[1]), `wires listed: ${row}`);
+            assert.ok(cells[2].includes(" -> "), "a wire names both ports");
+        }
         const page = fs.readFileSync(path.join(docDir, "Rover.Rover.html"), "utf8");
+        assert.ok(page.includes('<table class="buses">'), "bus table in the page");
         assert.strictEqual((page.match(/<section data-name="/g) || []).length, 3, "one section per topology");
         assert.ok(!page.includes("<?xml"), "svg is inlined without the xml declaration");
 
